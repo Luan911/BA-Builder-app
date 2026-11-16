@@ -42,6 +42,10 @@ const P = {
   moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
   chevron: '<path d="m9 18 6-6-6-6"/>',
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/>',
+  pencil: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   volume: '<path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
@@ -211,22 +215,10 @@ export function readAloudBar(getText, label = 'document') {
   el.innerHTML = `
     <button class="btn sm" data-play title="Read this ${esc(label)} aloud">${icon('volume', 15)}<span>Read aloud</span></button>
     <button class="icon-btn sm" data-stop title="Stop" hidden>${icon('stop', 14)}</button>
-    <select class="sm" data-rate title="Speed" aria-label="Reading speed">
-      ${[0.75, 0.9, 1, 1.15, 1.3, 1.5].map((r) => `<option value="${r}" ${Number(s.rate) === r ? 'selected' : ''}>${r}×</option>`).join('')}
-    </select>
-    <select class="sm voice" data-voice title="Voice" aria-label="Voice"><option value="">Default voice</option></select>
     <span class="progress small muted" data-progress></span>`;
   const play = $('[data-play]', el);
   const stopBtn = $('[data-stop]', el);
   const prog = $('[data-progress]', el);
-  const voiceSel = $('[data-voice]', el);
-  const fillVoices = () => {
-    const cur = getSettings().voiceURI;
-    voiceSel.innerHTML = `<option value="">Default voice</option>${getVoices()
-      .map((v) => `<option value="${esc(v.voiceURI)}" ${v.voiceURI === cur ? 'selected' : ''}>${esc(v.name)} (${esc(v.lang)})</option>`)
-      .join('')}`;
-  };
-  onVoicesReady(fillVoices);
   let mine = false;
   const render = (st) => {
     const active = mine && st.status !== 'idle';
@@ -247,8 +239,6 @@ export function readAloudBar(getText, label = 'document') {
     render(getSpeechState());
   });
   stopBtn.addEventListener('click', () => stop());
-  $('[data-rate]', el).addEventListener('change', (e) => updateSettings({ rate: Number(e.target.value) }));
-  voiceSel.addEventListener('change', (e) => updateSettings({ voiceURI: e.target.value }));
   // Stop listening when the bar leaves the page.
   const obs = new MutationObserver(() => {
     if (!el.isConnected) {

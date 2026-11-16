@@ -1,9 +1,12 @@
-// Dashboard: readiness, current phase, next actions per audience, key numbers.
-import { getProject, getEvaluation } from '../store.js';
-import { nextActions, dorGaps } from '../rules.js';
-import { riskRating } from '../model.js';
-import { esc, icon } from '../ui/dom.js';
+// Home: where am I, what do I do next, and quick access to the outputs.
+import { getProject, getEvaluation, getSettings } from '../store.js';
+import { generateDocs } from '../generators/docs.js';
+import { allDiagrams } from '../generators/diagrams.js';
+import { packPdf, downloadBlob } from '../export.js';
+import { esc, icon, $, busy, toast } from '../ui/dom.js';
 import { sectionRoute, sectionTitle } from './editor.js';
+import { STEPS, stepRoute } from '../ui/steps.js';
+import { stepStatus } from './build.js';
 
 export function ring(score, size = 132) {
   const r = (size - 14) / 2;
@@ -29,79 +32,69 @@ export function phaseStepper(ev, compact = false) {
     .join('')}</ol>`;
 }
 
-function actionColumn(title, iconName, items, who) {
-  return `<section class="card action-col">
-    <h3>${icon(iconName, 16)} ${esc(title)} <span class="count">${items.length}</span></h3>
-    ${
-      items.length
-        ? `<ul class="actions">${items
-            .map((i) => `<li><span class="sev-bar ${i.rule.severity}"></span><div><p>${esc(i.message)}</p><a href="${sectionRoute(i.rule.section)}" class="link small">Fix in ${esc(sectionTitle(i.rule.section))} ${icon('chevron', 12)}</a></div></li>`)
-            .join('')}</ul>`
-        : `<p class="muted small">${icon('check', 14)} Nothing outstanding for the ${esc(who)}.</p>`
-    }
-  </section>`;
-}
+const WHO = { client: 'Client', dev: 'Developers', ba: 'You' };
 
 export function renderDashboard(root) {
   const p = getProject();
   const ev = getEvaluation();
-  const na = nextActions(ev, 6);
-  const reqs = p.requirements.filter((r) => r.status !== 'Rejected');
-  const ready = reqs.filter((r) => !dorGaps(p, r).length).length;
-  const tests = reqs.reduce((n, r) => n + r.acceptance.length, 0);
-  const highRisks = p.risks.filter((r) => r.status !== 'Closed' && riskRating(r) === 'High').length;
-  const openQ = p.questions.filter((q) => q.status !== 'Answered').length;
-  const cur = ev.current;
-  const empty = !p.meta.name && !reqs.length;
+  const isNew = !p.meta.name && !p.requirements.length;
+  // The first step with problems is where to continue.
+  const nextStep = STEPS.find((s) => stepStatus(s, ev) === 'err') || STEPS.find((s) => stepStatus(s, ev) === 'warn');
+  const todo = ev.issues.filter((i) => i.rule.severity === 'error').concat(ev.issues.filter((i) => i.rule.severity === 'warning')).slice(0, 5);
+  const total = ev.issues.filter((i) => i.rule.severity !== 'info').length;
 
   root.innerHTML = `
-    ${
-      empty
-        ? `<section class="card hero-empty">
-            <h1>Start a new project</h1>
-            <p class="lead">Work through the phases in order. AutoSpec checks every step and writes the documents and diagrams for you.</p>
-            <div class="row gap"><a class="btn primary" href="#/project">${icon('flag', 16)}<span>Set up the project</span></a><a class="btn" href="#/import">${icon('upload', 16)}<span>Import notes, code or a spreadsheet</span></a></div>
-          </section>`
-        : ''
-    }
-    <section class="hero card">
-      <div class="hero-main">
-        <div class="eyebrow">${esc(p.meta.client || 'Project')} ${p.meta.code ? `· ${esc(p.meta.code)}` : ''} · ${esc(p.meta.methodology)}</div>
-        <h1>${esc(p.meta.name || 'Untitled project')}</h1>
-        <p class="lead">${esc(p.meta.summary || 'Add an executive summary on the Project & scope page.')}</p>
-        <div class="current-phase">
-          <span class="muted small">Current phase</span>
-          <strong>${cur.phase.order}. ${esc(cur.phase.name)}</strong>
-          <span class="pill ${cur.errors.length ? 'err' : 'ok'}">${cur.errors.length ? `${cur.errors.length} blocking check${cur.errors.length === 1 ? '' : 's'}` : 'No blockers'}</span>
-          <a class="btn sm" href="#/lifecycle?phase=${cur.phase.id}">Open phase gate ${icon('chevron', 14)}</a>
+    <div class="home">
+      <header class="home-head">
+        <div>
+          <h1>${esc(p.meta.name || 'New project')}</h1>
+          <p class="muted">${esc([p.meta.client, `Phase ${ev.current.phase.order}: ${ev.current.phase.name}`].filter(Boolean).join(' · '))}</p>
         </div>
+        <div class="home-score">${ring(ev.score, 96)}<span class="muted small">ready</span></div>
+      </header>
+
+      <section class="card continue">
+        ${
+          isNew
+            ? `<div><h2>Let's start your project</h2><p class="muted">Answer a few questions, step by step. AutoSpec checks your answers and writes the documents and diagrams for you.</p></div>
+               <a class="btn primary lg" href="${stepRoute('basics')}">Start step 1 ${icon('chevron', 16)}</a>`
+            : nextStep
+              ? `<div><span class="muted small">Next up</span><h2>Step ${STEPS.indexOf(nextStep) + 1}: ${esc(nextStep.title)}</h2><p class="muted">${esc(nextStep.hint)}</p></div>
+                 <a class="btn primary lg" href="${stepRoute(nextStep.id)}">Continue ${icon('chevron', 16)}</a>`
+              : `<div><h2>${icon('check', 20)} All steps look good</h2><p class="muted">Review your documents, then sign off each phase.</p></div>
+                 <a class="btn primary lg" href="#/docs">Open documents ${icon('chevron', 16)}</a>`
+        }
+      </section>
+
+      ${
+        todo.length
+          ? `<section class="card">
+              <div class="card-head-plain"><h3>To do</h3><a class="link small" href="#/quality">See all ${total} ${icon('chevron', 12)}</a></div>
+              <ul class="todo">${todo
+                .map(
+                  (i) => `<li><a href="${sectionRoute(i.rule.section)}">
+                    <span class="fix-dot ${i.rule.severity === 'error' ? 'err' : 'warn'}"></span>
+                    <span class="todo-text">${esc(i.message)}</span>
+                    <span class="who">${WHO[i.rule.audience]}</span>
+                    ${icon('chevron', 15, 'go')}</a></li>`
+                )
+                .join('')}</ul>
+            </section>`
+          : ''
+      }
+
+      <div class="quick">
+        <a class="quick-card" href="#/docs">${icon('file', 20)}<span><b>Documents</b><small>10 ready-made documents</small></span></a>
+        <a class="quick-card" href="#/diagrams">${icon('shapes', 20)}<span><b>Diagrams</b><small>Drawn from your data</small></span></a>
+        <button class="quick-card" data-pack>${icon('download', 20)}<span><b>Download PDF pack</b><small>Everything in one file</small></span></button>
       </div>
-      <div class="hero-score">${ring(ev.score)}<span class="muted small">Overall readiness</span></div>
-    </section>
-
-    <section class="card">${phaseStepper(ev)}</section>
-
-    <h2 class="section-title">Next actions</h2>
-    <div class="grid-3">
-      ${actionColumn('Client needs to provide', 'users', na.client, 'client')}
-      ${actionColumn('Delivery team needs', 'code', na.dev, 'delivery team')}
-      ${actionColumn('Business analysis to do', 'list', na.ba, 'analyst')}
-    </div>
-
-    <h2 class="section-title">At a glance</h2>
-    <div class="stats">
-      <a class="stat" href="#/s/requirements"><span class="stat-num">${reqs.length}</span><span class="stat-label">Requirements</span><span class="stat-sub">${reqs.filter((r) => r.priority === 'Must').length} Must-have</span></a>
-      <a class="stat" href="#/docs/stories"><span class="stat-num">${ready}<small>/${reqs.length}</small></span><span class="stat-label">Stories ready</span><span class="stat-sub">Definition of Ready</span></a>
-      <a class="stat" href="#/docs/testplan"><span class="stat-num">${tests}</span><span class="stat-label">Test cases</span><span class="stat-sub">from acceptance criteria</span></a>
-      <a class="stat" href="#/s/entities"><span class="stat-num">${p.entities.length}</span><span class="stat-label">Data entities</span><span class="stat-sub">${p.relationships.length} relationships</span></a>
-      <a class="stat" href="#/s/raid"><span class="stat-num ${highRisks ? 'err' : ''}">${p.risks.filter((r) => r.status !== 'Closed').length}</span><span class="stat-label">Open risks</span><span class="stat-sub">${highRisks} high</span></a>
-      <a class="stat" href="#/s/decisions"><span class="stat-num ${openQ ? 'warn' : ''}">${openQ}</span><span class="stat-label">Open questions</span><span class="stat-sub">${p.decisions.length} decisions logged</span></a>
-    </div>
-
-    <h2 class="section-title">Outputs</h2>
-    <div class="grid-3">
-      <a class="card link-card" href="#/docs">${icon('file', 22)}<div><h3>Documents</h3><p class="muted small">Charter, BRD, SRS, stories, RTM, test plan, design, RAID, deployment, gate report.</p></div></a>
-      <a class="card link-card" href="#/diagrams">${icon('shapes', 22)}<div><h3>Diagrams</h3><p class="muted small">Process, sequence, ERD, architecture, use cases, lifecycle and roadmap.</p></div></a>
-      <a class="card link-card" href="#/quality">${icon('shield', 22)}<div><h3>Quality check</h3><p class="muted small">${ev.issues.filter((i) => i.rule.severity !== 'info').length} open findings across ${ev.results.length} automated checks.</p></div></a>
     </div>`;
+
+  $('[data-pack]', root).addEventListener('click', (e) =>
+    busy(e.currentTarget, 'Building PDF…', async (progress) => {
+      downloadBlob(await packPdf(generateDocs(p, ev), allDiagrams(p, ev, { lanes: getSettings().lanes }), p, getSettings(), progress), `${(p.meta.code || 'Project').replace(/\W+/g, '')}_Documentation_Pack.pdf`);
+      toast('PDF downloaded');
+    })
+  );
+  void sectionTitle;
 }

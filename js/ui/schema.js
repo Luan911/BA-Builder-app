@@ -62,7 +62,7 @@ export const PAGES = {
     tips: ['Exactly one person should be Accountable (A) in RACI.', 'Mark everyone who must sign off as an approver.', 'Users become the "As a ..." in user stories and the lanes in process diagrams.'],
     blocks: [
       {
-        key: 'stakeholders', title: 'Stakeholders', singular: 'stakeholder',
+        key: 'stakeholders', title: 'Stakeholders', singular: 'stakeholder', show: [0, 3, 5],
         columns: [
           { label: 'Name', value: (s) => `<b>${esc(s.name)}</b><div class="muted small">${esc(s.role || '')}</div>` },
           { label: 'Organisation', value: (s) => short(s.organisation, 40) },
@@ -74,18 +74,18 @@ export const PAGES = {
         fields: [
           { key: 'name', label: 'Name', required: true },
           { key: 'role', label: 'Role / title', required: true },
-          { key: 'organisation', label: 'Organisation' },
+          { key: 'organisation', label: 'Organisation', advanced: true },
           { key: 'side', label: 'Side', type: 'select', options: STAKEHOLDER_SIDES },
           { key: 'raci', label: 'RACI', type: 'select', options: [{ value: 'A', label: 'A — Accountable' }, { value: 'R', label: 'R — Responsible' }, { value: 'C', label: 'C — Consulted' }, { value: 'I', label: 'I — Informed' }] },
-          { key: 'email', label: 'Email' },
-          { key: 'influence', label: 'Influence', type: 'select', options: LEVELS },
-          { key: 'interest', label: 'Interest', type: 'select', options: LEVELS },
+          { key: 'email', label: 'Email', advanced: true },
+          { key: 'influence', label: 'Influence', type: 'select', options: LEVELS, advanced: true },
+          { key: 'interest', label: 'Interest', type: 'select', options: LEVELS, advanced: true },
           { key: 'approver', label: 'Signs off documents and phase gates', type: 'checkbox' },
         ],
         newItem: () => ({ side: 'Client', raci: 'C', influence: 'Medium', interest: 'Medium', approver: false }),
       },
       {
-        key: 'actors', title: 'Users (actors)', singular: 'user type',
+        key: 'actors', title: 'Users (actors)', singular: 'user type', show: [0, 1],
         columns: [
           { label: 'User type', value: (a) => `<b>${esc(a.name)}</b>` },
           { label: 'Description', value: (a) => short(a.description) },
@@ -114,10 +114,10 @@ export const PAGES = {
     ],
     blocks: [
       {
-        key: 'requirements', title: 'Requirements', singular: 'requirement', prefix: 'FR-', pad: 3, wide: true,
+        key: 'requirements', title: 'Requirements', singular: 'requirement', prefix: 'FR-', pad: 3, wide: true, show: [0, 1, 2, 3],
         columns: [
           { label: 'ID', value: (r) => `<b>${esc(r.code)}</b>`, w: '86px' },
-          { label: 'Requirement', value: (r, p) => `<b>${esc(r.title)}</b><div class="muted small">${short(storyFor(p, r), 120)}</div>` },
+          { label: 'Requirement', value: (r) => `<b>${esc(r.title)}</b>` },
           { label: 'Priority', value: (r) => pill(r.priority, prioKind[r.priority]), w: '90px' },
           { label: 'Tests', value: (r) => (r.acceptance.length ? pill(`${r.acceptance.length}`, 'ok') : pill('0', 'err')), w: '70px' },
           { label: 'Release', value: (r, p) => short(releaseName(p, r.releaseId), 28), w: '150px' },
@@ -130,9 +130,9 @@ export const PAGES = {
           { key: 'actorId', label: 'User (As a ...)', type: 'select', options: opt.actors, required: true },
           { key: 'benefit', label: 'Benefit (so that ...)', placeholder: 'e.g. my appointment is confirmed without phoning' },
           { key: 'priority', label: 'Priority (MoSCoW)', type: 'select', options: PRIORITIES, required: true },
-          { key: 'status', label: 'Status', type: 'select', options: REQ_STATUSES, blank: false },
-          { key: 'source', label: 'Source (who asked)', type: 'select', options: opt.stakeholders },
-          { key: 'releaseId', label: 'Release', type: 'select', options: opt.releases },
+          { key: 'status', label: 'Status', type: 'select', options: REQ_STATUSES, blank: false, advanced: true },
+          { key: 'source', label: 'Source (who asked)', type: 'select', options: opt.stakeholders, advanced: true },
+          { key: 'releaseId', label: 'Release', type: 'select', options: opt.releases, advanced: true },
           { key: 'objectiveIds', label: 'Supports objectives', type: 'multiselect', options: opt.objectives, span: 2, emptyText: 'Add business objectives first.' },
           {
             key: 'acceptance', label: 'Acceptance criteria (Given / When / Then)', type: 'repeater', addLabel: 'Add scenario',
@@ -146,7 +146,7 @@ export const PAGES = {
             ],
             newRow: () => ({ id: uid('ac') }),
           },
-          { key: 'notes', label: 'Notes', type: 'textarea', span: 2 },
+          { key: 'notes', label: 'Notes', type: 'textarea', span: 2, advanced: true },
         ],
         newItem: () => ({ status: 'Proposed', objectiveIds: [], acceptance: [], statement: 'The system shall ' }),
       },
@@ -161,7 +161,7 @@ export const PAGES = {
     tips: ['Good: "Page load time (95th percentile) < 2 seconds on 4G".', 'Each selected compliance standard needs a matching NFR.', 'Systems holding personal data need Security and Privacy NFRs.'],
     blocks: [
       {
-        key: 'nfrs', title: 'Non-functional requirements', singular: 'NFR', prefix: 'NFR-', pad: 3,
+        key: 'nfrs', title: 'Quality requirements (non-functional)', singular: 'quality requirement', prefix: 'NFR-', pad: 3, show: [1, 2, 4],
         columns: [
           { label: 'ID', value: (n) => `<b>${esc(n.code)}</b>`, w: '96px' },
           { label: 'Category', value: (n) => pill(n.category), w: '130px' },
@@ -214,7 +214,7 @@ export const PAGES = {
     tips: ['Every entity needs one primary key (PK).', 'Foreign keys (FK) must reference an existing entity.', 'Write validation rules developers can code, e.g. "E.164 format".'],
     blocks: [
       {
-        key: 'entities', title: 'Entities', singular: 'entity', wide: true,
+        key: 'entities', title: 'Entities', singular: 'entity', wide: true, show: [0, 1],
         columns: [
           { label: 'Entity', value: (e) => `<b>${esc(e.name)}</b><div class="muted small">${short(e.description, 80)}</div>` },
           { label: 'Fields', value: (e) => esc(e.fields.map((f) => f.name + (f.pk ? ' (PK)' : f.fk ? ' (FK)' : '')).join(', ')) || '<span class="muted">—</span>' },
@@ -267,7 +267,7 @@ export const PAGES = {
     tips: ['Start with one Start step and finish with at least one End step.', 'Decisions need both a Yes and a No path.', 'If "Next" is empty, the step continues to the row below it.', 'Pick an external system on a step to show the call in the sequence diagram.'],
     blocks: [
       {
-        key: 'processes', title: 'Processes', singular: 'process', wide: true,
+        key: 'processes', title: 'Processes', singular: 'process', wide: true, show: [0, 1],
         columns: [
           { label: 'Process', value: (pr) => `<b>${esc(pr.name)}</b><div class="muted small">${short(pr.description, 100)}</div>` },
           { label: 'Steps', value: (pr) => String(pr.steps.length), w: '80px' },
@@ -310,7 +310,7 @@ export const PAGES = {
     tips: ['Name an owner for each system — they provide access and test environments.', 'Record authentication (API key, OAuth 2.0, mutual TLS ...).'],
     blocks: [
       {
-        key: 'integrations', title: 'Integrations', singular: 'integration',
+        key: 'integrations', title: 'Integrations', singular: 'integration', show: [0, 2, 3],
         columns: [
           { label: 'System', value: (i) => `<b>${esc(i.name)}</b><div class="muted small">${short(i.purpose, 80)}</div>` },
           { label: 'Direction', value: (i) => pill(i.direction), w: '110px' },
@@ -340,7 +340,7 @@ export const PAGES = {
     tips: ['Include every external system as an "external" component.', 'Connect each component to the ones it calls.'],
     blocks: [
       {
-        key: 'components', title: 'Components', singular: 'component',
+        key: 'components', title: 'Architecture components', singular: 'component', show: [0, 1, 3],
         columns: [
           { label: 'Component', value: (c) => `<b>${esc(c.name)}</b>` },
           { label: 'Type', value: (c) => pill(c.type), w: '110px' },
@@ -366,7 +366,7 @@ export const PAGES = {
     tips: ['Every Must-have needs a release.', 'Finish the last release before the target go-live date.'],
     blocks: [
       {
-        key: 'releases', title: 'Releases', singular: 'release',
+        key: 'releases', title: 'Releases', singular: 'release', show: [0, 1, 2],
         columns: [
           { label: 'Release', value: (r) => `<b>${esc(r.name)}</b><div class="muted small">${short(r.goal, 90)}</div>` },
           { label: 'Start', value: (r) => esc(r.start || '—'), w: '110px' },
@@ -391,7 +391,7 @@ export const PAGES = {
     tips: ['Risk score = likelihood × impact (1–5 each). 15+ is High.', 'Every open risk needs a mitigation and an owner.', 'Validate assumptions early — a wrong assumption becomes an issue.'],
     blocks: [
       {
-        key: 'risks', title: 'Risks', singular: 'risk', prefix: 'R-', pad: 2,
+        key: 'risks', title: 'Risks', singular: 'risk', prefix: 'R-', pad: 2, show: [1, 2, 4],
         columns: [
           { label: 'ID', value: (r) => `<b>${esc(r.code)}</b>`, w: '70px' },
           { label: 'Risk', value: (r) => short(r.description, 110) },
@@ -411,7 +411,7 @@ export const PAGES = {
         newItem: () => ({ likelihood: 3, impact: 3, status: 'Open' }),
       },
       {
-        key: 'assumptions', title: 'Assumptions', singular: 'assumption', prefix: 'A-', pad: 2,
+        key: 'assumptions', title: 'Assumptions', singular: 'assumption', prefix: 'A-', pad: 2, show: [1, 3],
         columns: [
           { label: 'ID', value: (a) => `<b>${esc(a.code)}</b>`, w: '70px' },
           { label: 'Assumption', value: (a) => short(a.text, 140) },
@@ -426,7 +426,7 @@ export const PAGES = {
         ],
       },
       {
-        key: 'constraints', title: 'Constraints', singular: 'constraint', prefix: 'C-', pad: 2,
+        key: 'constraints', title: 'Constraints', singular: 'constraint', prefix: 'C-', pad: 2, show: [1],
         columns: [
           { label: 'ID', value: (c) => `<b>${esc(c.code)}</b>`, w: '70px' },
           { label: 'Constraint', value: (c) => short(c.text, 160) },
@@ -437,7 +437,7 @@ export const PAGES = {
         ],
       },
       {
-        key: 'dependencies', title: 'Dependencies', singular: 'dependency', prefix: 'DEP-', pad: 2,
+        key: 'dependencies', title: 'Dependencies', singular: 'dependency', prefix: 'DEP-', pad: 2, show: [1, 3],
         columns: [
           { label: 'ID', value: (d) => `<b>${esc(d.code)}</b>`, w: '86px' },
           { label: 'Dependency', value: (d) => short(d.text, 110) },
@@ -462,7 +462,7 @@ export const PAGES = {
     tips: ['A decision without a rationale will be re-debated later.', 'Give every question an owner and a due date.', '"Asked of" decides whether it appears under client or delivery-team actions.'],
     blocks: [
       {
-        key: 'questions', title: 'Questions', singular: 'question', prefix: 'Q-', pad: 2,
+        key: 'questions', title: 'Open questions', singular: 'question', prefix: 'Q-', pad: 2, show: [1, 2, 4],
         columns: [
           { label: 'ID', value: (q) => `<b>${esc(q.code)}</b>`, w: '70px' },
           { label: 'Question', value: (q) => `${short(q.question, 110)}${q.answer ? `<div class="muted small">Answer: ${short(q.answer, 90)}</div>` : ''}` },
@@ -482,7 +482,7 @@ export const PAGES = {
         newItem: () => ({ askedOf: 'Client', status: 'Open' }),
       },
       {
-        key: 'decisions', title: 'Decisions', singular: 'decision', prefix: 'D-', pad: 2,
+        key: 'decisions', title: 'Decisions', singular: 'decision', prefix: 'D-', pad: 2, show: [1, 2],
         columns: [
           { label: 'ID', value: (d) => `<b>${esc(d.code)}</b>`, w: '70px' },
           { label: 'Date', value: (d) => esc(d.date || '—'), w: '110px' },

@@ -2,17 +2,17 @@
 import { getProject, getEvaluation, getSettings } from '../store.js';
 import { DIAGRAM_DEFS, buildDiagram } from '../generators/diagrams.js';
 import { renderMermaid, svgToPng, exportableSvg, downloadBlob, downloadText } from '../export.js';
-import { esc, icon, $, $$, readAloudBar, toast } from '../ui/dom.js';
+import { esc, icon, $, $$, readAloudBar, toast, attachMenu } from '../ui/dom.js';
 import { slug } from '../model.js';
 
 const EDIT_LINK = {
-  process: ['#/s/processes', 'Edit processes'],
-  sequence: ['#/s/processes', 'Edit processes'],
-  erd: ['#/s/entities', 'Edit data model'],
-  architecture: ['#/s/components', 'Edit architecture'],
-  usecase: ['#/s/requirements', 'Edit requirements'],
-  lifecycle: ['#/lifecycle', 'Open lifecycle'],
-  roadmap: ['#/s/releases', 'Edit releases'],
+  process: ['#/build/processes', 'Edit processes'],
+  sequence: ['#/build/processes', 'Edit processes'],
+  erd: ['#/build/data', 'Edit data'],
+  architecture: ['#/build/systems', 'Edit systems'],
+  usecase: ['#/build/requirements', 'Edit requirements'],
+  lifecycle: ['#/lifecycle', 'Open phases'],
+  roadmap: ['#/build/plan', 'Edit releases'],
 };
 
 export function renderDiagrams(root, kind, procId) {
@@ -26,10 +26,9 @@ export function renderDiagrams(root, kind, procId) {
   let zoom = 1;
 
   root.innerHTML = `
-    <header class="page-head">
-      <div class="eyebrow">Outputs</div>
-      <h1>${icon('shapes', 22)} Diagrams</h1>
-      <p class="lead">Drawn automatically from your data, so they always match the documents. To change a diagram, change the data behind it.</p>
+    <header class="page-head simple">
+      <h1>Diagrams</h1>
+      <p class="lead">Drawn for you from your answers, so they always match the documents.</p>
     </header>
     <div class="tabs" role="tablist">${DIAGRAM_DEFS.map(
       (d) => `<a role="tab" href="#/diagrams/${d.id}${d.perProcess && proc ? `/${proc.id}` : ''}" class="${d.id === def.id ? 'active' : ''}" aria-selected="${d.id === def.id}">${esc(d.title)}</a>`
@@ -43,9 +42,7 @@ export function renderDiagrams(root, kind, procId) {
         <div class="tb-right">
           <button class="icon-btn sm" data-zoom="-1" aria-label="Zoom out">${icon('zoomOut', 16)}</button>
           <button class="icon-btn sm" data-zoom="1" aria-label="Zoom in">${icon('zoomIn', 16)}</button>
-          <button class="btn sm" data-code>${icon('code', 14)}<span>Mermaid</span></button>
-          <button class="btn sm" data-svg>${icon('download', 14)}<span>SVG</span></button>
-          <button class="btn sm primary" data-png>${icon('image', 14)}<span>PNG</span></button>
+          <button class="btn sm primary" data-dl>${icon('download', 14)}<span>Download</span>${icon('chevronDown', 13)}</button>
         </div>
       </div>
       <div class="diagram-stage" data-stage>${needsProcess ? `<div class="empty-block"><p>No processes yet.</p><a class="btn sm" href="#/s/processes">${icon('plus', 14)}<span>Map a process</span></a></div>` : '<div class="loading"><span class="spinner"></span> Drawing…</div>'}</div>
@@ -91,22 +88,22 @@ export function renderDiagrams(root, kind, procId) {
       applyZoom();
     })
   );
-  $('[data-code]', root).addEventListener('click', () => {
-    const v = $('[data-codeview]', root);
-    v.hidden = !v.hidden;
-  });
   const name = slug(dg.title);
-  $('[data-svg]', root).addEventListener('click', () => {
-    if (!svgCache) return toast('The diagram is still drawing.', 'info');
-    downloadText(exportableSvg(svgCache), `${name}.svg`, 'image/svg+xml');
-  });
-  $('[data-png]', root).addEventListener('click', async () => {
-    if (!svgCache) return toast('The diagram is still drawing.', 'info');
-    try {
-      const { canvas } = await svgToPng(svgCache, 2.5);
-      canvas.toBlob((b) => b && downloadBlob(b, `${name}.png`), 'image/png');
-    } catch (e) {
-      toast(e.message, 'err');
-    }
-  });
+  const ready = () => svgCache || (toast('The diagram is still drawing.', 'info'), false);
+  attachMenu($('[data-dl]', root), [
+    {
+      label: 'Image for slides (.png)', icon: 'image',
+      onClick: async () => {
+        if (!ready()) return;
+        try {
+          const { canvas } = await svgToPng(svgCache, 2.5);
+          canvas.toBlob((b) => b && downloadBlob(b, `${name}.png`), 'image/png');
+        } catch (e) {
+          toast(e.message, 'err');
+        }
+      },
+    },
+    { label: 'Sharp vector image (.svg)', icon: 'download', onClick: () => ready() && downloadText(exportableSvg(svgCache), `${name}.svg`, 'image/svg+xml') },
+    { label: 'Show diagram code (Mermaid)', icon: 'code', onClick: () => ($('[data-codeview]', root).hidden = !$('[data-codeview]', root).hidden) },
+  ]);
 }

@@ -15,16 +15,15 @@ export function renderLifecycle(root, params) {
   const approvers = p.stakeholders.filter((s) => s.approver);
 
   root.innerHTML = `
-    <header class="page-head">
-      <div class="eyebrow">SDLC & Project Life Cycle</div>
-      <h1>${icon('lifecycle', 22)} Lifecycle & phase gates</h1>
-      <p class="lead">Phases run in this order. A phase can only be approved when the one before it is approved, every blocking check passes and its checklist is complete.</p>
+    <header class="page-head simple">
+      <h1>Phases & sign-off</h1>
+      <p class="lead">The project moves through these phases in order. Each phase is signed off once its checks pass.</p>
     </header>
 
     <section class="card">${phaseStepper(ev)}</section>
 
-    <section class="card">
-      <h2 class="card-title">How the SDLC maps to the Project Life Cycle (PLC)</h2>
+    <details class="card help-card">
+      <summary>${icon('info', 15)} How these phases map to the Project Life Cycle (PLC)</summary>
       <div class="plc">${PLC_STAGES.map(
         (s) => `<div class="plc-stage"><h4>${esc(s.name)}</h4><p class="muted small">${esc(s.purpose)}</p><div class="chips">${
           PHASES.filter((ph) => ph.plc.includes(s.id))
@@ -33,7 +32,7 @@ export function renderLifecycle(root, params) {
         }</div></div>`
       ).join('')}</div>
       <p class="small muted">${icon('info', 14)} <b>${esc(p.meta.methodology)}:</b> ${esc(METHODOLOGY_NOTES[p.meta.methodology] || '')}</p>
-    </section>
+    </details>
 
     <div class="stack">
       ${ev.phases

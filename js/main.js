@@ -1,9 +1,9 @@
 // App shell: layout, navigation, router and global actions.
 import { load, subscribe, getProject, getEvaluation, getSettings, updateSettings, undo, canUndo, lastSaveOk } from './store.js';
-import { issuesBySection } from './rules.js';
 import { esc, icon, $, $$, toast, attachMenu, busy, closeAllModals } from './ui/dom.js';
 import { renderDashboard } from './views/dashboard.js';
-import { renderProject, renderSection } from './views/editor.js';
+import { renderBuild, stepStatus } from './views/build.js';
+import { STEPS, stepForSection } from './ui/steps.js';
 import { renderLifecycle } from './views/lifecycle.js';
 import { renderDocuments } from './views/documents.js';
 import { renderDiagrams } from './views/diagrams.js';
@@ -16,44 +16,8 @@ import { packPdf, zipPack, downloadBlob, downloadText } from './export.js';
 import { stop as stopSpeech } from './speech.js';
 
 const NAV = [
-  { group: 'Overview', items: [['#/', 'Dashboard', 'dashboard', null], ['#/lifecycle', 'Lifecycle & gates', 'lifecycle', 'lifecycle']] },
-  {
-    group: '1 · Initiation',
-    items: [
-      ['#/project', 'Project & scope', 'flag', 'project'],
-      ['#/s/objectives', 'Objectives', 'target', 'objectives'],
-      ['#/s/stakeholders', 'Stakeholders & users', 'users', 'stakeholders'],
-      ['#/s/raid', 'RAID log', 'alert', 'raid'],
-      ['#/s/decisions', 'Decisions & questions', 'chat', 'decisions'],
-    ],
-  },
-  {
-    group: '2 · Requirements',
-    items: [
-      ['#/s/requirements', 'Functional', 'list', 'requirements'],
-      ['#/s/nfrs', 'Non-functional', 'gauge', 'nfrs'],
-      ['#/s/rules', 'Business rules', 'scale', 'rules'],
-    ],
-  },
-  {
-    group: '3 · Design',
-    items: [
-      ['#/s/entities', 'Data model', 'database', 'entities'],
-      ['#/s/processes', 'Processes', 'workflow', 'processes'],
-      ['#/s/integrations', 'Integrations', 'plug', 'integrations'],
-      ['#/s/components', 'Architecture', 'layers', 'components'],
-    ],
-  },
-  { group: '4 · Delivery', items: [['#/s/releases', 'Releases', 'calendar', 'releases']] },
-  {
-    group: 'Outputs',
-    items: [
-      ['#/docs', 'Documents', 'file', null],
-      ['#/diagrams', 'Diagrams', 'shapes', null],
-      ['#/quality', 'Quality check', 'shield', null],
-    ],
-  },
-  { group: 'Tools', items: [['#/import', 'Import', 'upload', null], ['#/settings', 'Settings', 'settings', null]] },
+  { group: '', items: [['#/', 'Home', 'home', null], ['#/build/basics', 'Build your spec', 'pencil', 'build'], ['#/docs', 'Documents', 'file', null], ['#/diagrams', 'Diagrams', 'shapes', null]] },
+  { group: 'More', items: [['#/lifecycle', 'Phases & sign-off', 'lifecycle', null], ['#/quality', 'All checks', 'shield', null], ['#/import', 'Import', 'upload', null], ['#/settings', 'Settings', 'settings', null]] },
 ];
 
 function shell() {
@@ -62,7 +26,7 @@ function shell() {
     <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="brand"><span class="brand-mark">${icon('logo', 18)}</span><span><b>AutoSpec</b> Studio</span></div>
       <nav>${NAV.map(
-        (g) => `<div class="nav-group"><div class="nav-label">${esc(g.group)}</div>${g.items
+        (g) => `<div class="nav-group">${g.group ? `<div class="nav-label">${esc(g.group)}</div>` : ''}${g.items
           .map(([href, label, ic, section]) => `<a href="${href}" data-nav="${href}" ${section ? `data-section="${section}"` : ''}>${icon(ic, 17)}<span>${esc(label)}</span><span class="badge" hidden></span></a>`)
           .join('')}</div>`
       ).join('')}</nav>
@@ -143,13 +107,12 @@ function refreshChrome() {
   sc.innerHTML = `<span class="score-dot"></span>${ev.score}% ready`;
   $('[data-undo]').disabled = !canUndo();
   $('[data-save-state]').textContent = lastSaveOk() ? 'Saved' : 'Not saved — browser storage is full or blocked';
-  const counts = issuesBySection(ev);
-  const gateBlockers = ev.current.errors.length;
+  const stepsWithErrors = STEPS.filter((st) => stepStatus(st, ev) === 'err').length;
   for (const a of $$('[data-section]')) {
-    const n = a.dataset.section === 'lifecycle' ? gateBlockers : counts[a.dataset.section] || 0;
     const b = $('.badge', a);
-    b.hidden = !n;
-    b.textContent = n;
+    b.hidden = !stepsWithErrors;
+    b.textContent = stepsWithErrors;
+    b.title = `${stepsWithErrors} step(s) need attention`;
   }
   document.title = `${p.meta.name ? `${p.meta.name} · ` : ''}AutoSpec Studio`;
 }
@@ -174,8 +137,9 @@ function renderView() {
   try {
     const [a, b, c] = parts;
     if (!a) renderDashboard(view);
-    else if (a === 'project') renderProject(view);
-    else if (a === 's') renderSection(view, b);
+    else if (a === 'build') renderBuild(view, b);
+    else if (a === 'project') location.replace('#/build/basics');
+    else if (a === 's') location.replace(`#/build/${stepForSection(b).id}`);
     else if (a === 'lifecycle') renderLifecycle(view, params);
     else if (a === 'docs') renderDocuments(view, b);
     else if (a === 'diagrams') renderDiagrams(view, b, c);
@@ -192,7 +156,9 @@ function renderView() {
   let best = null;
   for (const link of $$('[data-nav]')) {
     const href = link.dataset.nav;
-    const match = href === '#/' ? hash === '#/' || hash === '#' || hash === '' : hash.startsWith(href);
+    // Compare the first path segment, so every #/build/<step> highlights "Build your spec".
+    const seg = (h) => (h.replace(/^#\/?/, '').split(/[/?]/)[0] || '');
+    const match = seg(href) === seg(hash);
     if (match && (!best || href.length > best.dataset.nav.length)) best = link;
   }
   $$('[data-nav]').forEach((l) => {
@@ -228,7 +194,7 @@ function start() {
       if (undo()) toast('Undone', 'info');
     }
   });
-  if (firstRun) toast('This is an example project. Start your own from Settings → "Start a new blank project".', 'info', 7000);
+  if (firstRun) toast('You are looking at an example project. Start your own in Settings.', 'info', 6000);
 }
 
 start();

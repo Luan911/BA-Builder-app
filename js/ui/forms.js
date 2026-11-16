@@ -176,6 +176,10 @@ export function wireRepeaters(root, fields, p, item = {}) {
   }
 }
 
+/** Main fields first; fields marked `advanced` go in a collapsed "More details" section. */
 export function renderForm(fields, values, p) {
-  return `<div class="form-grid">${fields.map((f) => renderField(f, values[f.key], p, values)).join('')}</div>`;
+  const main = fields.filter((f) => !f.advanced);
+  const more = fields.filter((f) => f.advanced);
+  const grid = (list) => `<div class="form-grid">${list.map((f) => renderField(f, values[f.key], p, values)).join('')}</div>`;
+  return grid(main) + (more.length ? `<details class="more-fields"><summary>More details</summary>${grid(more)}</details>` : '');
 }

@@ -17,7 +17,7 @@ export function renderQuality(root, params) {
   root.innerHTML = `
     <header class="page-head">
       <div class="eyebrow">Outputs</div>
-      <h1>${icon('shield', 22)} Quality check</h1>
+      <h1>All checks</h1>
       <p class="lead">${ev.results.length} rules check the project against SDLC good practice (IEEE 29148 requirement quality, BABOK traceability, MoSCoW, RACI, RAID). Errors block a phase gate; warnings should be fixed; info is advice.</p>
     </header>
     <div class="stats">
