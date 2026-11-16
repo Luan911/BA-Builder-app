@@ -195,6 +195,28 @@ function start() {
     }
   });
   if (firstRun) toast('You are looking at an example project. Start your own in Settings.', 'info', 6000);
+  registerServiceWorker();
+}
+
+/**
+ * The service worker (sw.js) always checks the server for newer files, so updates
+ * show up on the next page load instead of after the host's 10-minute cache.
+ * The first time a new worker takes over an already-open page, reload once so
+ * every file comes from the same version.
+ */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return; // first install: nothing stale to replace
+    reloaded = true;
+    if (!$('.modal-backdrop')) location.reload();
+  });
+  navigator.serviceWorker
+    .register('sw.js')
+    .then((reg) => reg.update())
+    .catch((e) => console.warn('Service worker not registered:', e.message));
 }
 
 start();

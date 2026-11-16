@@ -49,6 +49,9 @@ The `.nojekyll` file tells GitHub Pages to serve the files exactly as they are.
   storage; use **Export → Project file** to back up, move or share a project.
 - The diagram, PDF and ZIP libraries (Mermaid, jsPDF, JSZip) load from the jsDelivr CDN
   the first time they are used, so those features need an internet connection.
+- Updates show up on the next page load: a small service worker (`sw.js`) always checks
+  for newer files instead of waiting for GitHub Pages' 10-minute cache. It also lets the app
+  open offline after the first visit.
 - Several people editing the same project at the same time would need a server and
   database; that is not part of a static site.
 - **Code import** reads source files as text and recognises structure (endpoints, tables,
@@ -63,6 +66,7 @@ The `.nojekyll` file tells GitHub Pages to serve the files exactly as they are.
 
 ```
 index.html              App entry point
+sw.js                   Service worker: fresh updates + offline support
 assets/app.css          Design system (light + dark themes, responsive)
 js/main.js              Layout, navigation and routing
 js/store.js             Project + settings state, autosave, undo
