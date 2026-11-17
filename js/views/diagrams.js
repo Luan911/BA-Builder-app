@@ -1,109 +1,61 @@
-// Diagrams: rendered from project data, with a spoken "Describe diagram" and exports.
-import { getProject, getEvaluation, getSettings } from '../store.js';
-import { DIAGRAM_DEFS, buildDiagram } from '../generators/diagrams.js';
-import { renderMermaid, svgToPng, exportableSvg, downloadBlob, downloadText } from '../export.js';
-import { esc, icon, $, $$, readAloudBar, toast, attachMenu } from '../ui/dom.js';
-import { slug } from '../model.js';
+// Generated diagrams: pick one, zoom, export SVG / PNG / Mermaid, or copy into the studio to customise.
+import { project, update } from '../store.js';
+import { esc, $, $$, toast, download, fileSafe } from '../ui.js';
+import { allDiagrams } from '../gen/diagrams.js';
+import { render, sized, svgToPng } from '../mermaid.js';
+import { uid } from '../model.js';
 
-const EDIT_LINK = {
-  process: ['#/build/processes', 'Edit processes'],
-  sequence: ['#/build/processes', 'Edit processes'],
-  erd: ['#/build/data', 'Edit data'],
-  architecture: ['#/build/systems', 'Edit systems'],
-  usecase: ['#/build/requirements', 'Edit requirements'],
-  lifecycle: ['#/lifecycle', 'Open phases'],
-  roadmap: ['#/build/plan', 'Edit releases'],
-};
+let zoom = 1;
+let lanes = true;
 
-export function renderDiagrams(root, kind, procId) {
-  const p = getProject();
-  const ev = getEvaluation();
-  const def = DIAGRAM_DEFS.find((d) => d.id === kind) || DIAGRAM_DEFS[0];
-  const proc = p.processes.find((x) => x.id === procId) || p.processes[0];
-  const needsProcess = def.perProcess && !proc;
-  const dg = needsProcess ? null : buildDiagram(p, ev, def.id, proc?.id, { lanes: getSettings().lanes });
-  let svgCache = '';
-  let zoom = 1;
-
-  root.innerHTML = `
-    <header class="page-head simple">
-      <h1>Diagrams</h1>
-      <p class="lead">Drawn for you from your answers, so they always match the documents.</p>
-    </header>
-    <div class="tabs" role="tablist">${DIAGRAM_DEFS.map(
-      (d) => `<a role="tab" href="#/diagrams/${d.id}${d.perProcess && proc ? `/${proc.id}` : ''}" class="${d.id === def.id ? 'active' : ''}" aria-selected="${d.id === def.id}">${esc(d.title)}</a>`
-    ).join('')}</div>
-    <section class="card flush diagram-card">
-      <div class="doc-toolbar">
-        <div class="tb-left">
-          ${def.perProcess && p.processes.length > 1 ? `<select data-proc aria-label="Process">${p.processes.map((x) => `<option value="${x.id}" ${x.id === proc?.id ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
-          <a class="btn sm ghost" href="${EDIT_LINK[def.id][0]}">${icon('edit', 14)}<span>${EDIT_LINK[def.id][1]}</span></a>
-        </div>
-        <div class="tb-right">
-          <button class="icon-btn sm" data-zoom="-1" aria-label="Zoom out">${icon('zoomOut', 16)}</button>
-          <button class="icon-btn sm" data-zoom="1" aria-label="Zoom in">${icon('zoomIn', 16)}</button>
-          <button class="btn sm primary" data-dl>${icon('download', 14)}<span>Download</span>${icon('chevronDown', 13)}</button>
-        </div>
-      </div>
-      <div class="diagram-stage" data-stage>${needsProcess ? `<div class="empty-block"><p>No processes yet.</p><a class="btn sm" href="#/s/processes">${icon('plus', 14)}<span>Map a process</span></a></div>` : '<div class="loading"><span class="spinner"></span> Drawing…</div>'}</div>
-      <pre class="code-view" data-codeview hidden><code>${esc(dg?.code || '')}</code></pre>
-    </section>
-    ${
-      dg
-        ? `<section class="card describe">
-            <div class="describe-head"><h2 class="card-title">${icon('volume', 16)} Describe diagram</h2><div data-tts></div></div>
-            <p class="describe-text">${esc(dg.description)}</p>
-          </section>`
-        : ''
-    }`;
-
-  $('[data-proc]', root)?.addEventListener('change', (e) => (location.hash = `#/diagrams/${def.id}/${e.target.value}`));
-  if (!dg) return;
-  $('[data-tts]', root).appendChild(readAloudBar(() => dg.description, 'diagram description'));
-
-  const stage = $('[data-stage]', root);
-  renderMermaid(dg.code)
-    .then((svg) => {
-      svgCache = svg;
-      stage.innerHTML = `<div class="svg-wrap">${svg}</div>`;
-      // Open fitted to the available width (never enlarged beyond 100%).
-      const vb = ($('svg', stage)?.getAttribute('viewBox') || '').split(/\s+/).map(Number);
-      if (vb.length === 4 && vb[2] > 0) zoom = Math.max(0.3, Math.min(1, (stage.clientWidth - 48) / vb[2]));
-      applyZoom();
-    })
-    .catch((e) => {
-      stage.innerHTML = `<div class="callout err">${icon('alert', 16)}<span>${esc(e.message || 'The diagram could not be drawn.')}</span></div>`;
-    });
-
-  function applyZoom() {
-    const svg = $('svg', stage);
-    if (!svg) return;
-    svg.style.maxWidth = 'none';
-    const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
-    if (vb.length === 4) svg.style.width = `${vb[2] * zoom}px`;
+export function renderDiagrams(root, key) {
+  const p = project();
+  const all = allDiagrams(p).filter((d) => d.def.id !== 'custom');
+  const cur = all.find((d) => d.key === key) || all.find((d) => d.def.id === key) || all[0];
+  if (cur.def.id === 'process' && !lanes) {
+    const proc = p.processes.find((x) => cur.key.endsWith(x.id));
+    cur.code = cur.def.build(p, proc, { lanes: false, direction: 'TD' });
   }
-  $$('[data-zoom]', root).forEach((b) =>
-    b.addEventListener('click', () => {
-      zoom = Math.min(3, Math.max(0.3, zoom + Number(b.dataset.zoom) * 0.2));
-      applyZoom();
-    })
-  );
-  const name = slug(dg.title);
-  const ready = () => svgCache || (toast('The diagram is still drawing.', 'info'), false);
-  attachMenu($('[data-dl]', root), [
-    {
-      label: 'Image for slides (.png)', icon: 'image',
-      onClick: async () => {
-        if (!ready()) return;
-        try {
-          const { canvas } = await svgToPng(svgCache, 2.5);
-          canvas.toBlob((b) => b && downloadBlob(b, `${name}.png`), 'image/png');
-        } catch (e) {
-          toast(e.message, 'err');
-        }
-      },
-    },
-    { label: 'Sharp vector image (.svg)', icon: 'download', onClick: () => ready() && downloadText(exportableSvg(svgCache), `${name}.svg`, 'image/svg+xml') },
-    { label: 'Show diagram code (Mermaid)', icon: 'code', onClick: () => ($('[data-codeview]', root).hidden = !$('[data-codeview]', root).hidden) },
-  ]);
+  const groups = [...new Set(all.map((d) => d.def.group))];
+  root.innerHTML = `
+    <div class="page-head"><div><h1>Diagrams</h1><p>Generated from your analysis, so they always match the documents. For anything else, use the Diagram studio or Whiteboard.</p></div></div>
+    <div class="docs">
+      <nav class="card doc-list" aria-label="Diagrams">${groups.map((g) => `<div class="nav-label">${esc(g)}</div>${all.filter((d) => d.def.group === g).map((d) => `<a href="#/diagrams/${encodeURIComponent(d.key)}" class="${d.key === cur.key ? 'on' : ''}">${esc(d.title)}</a>`).join('')}`).join('')}</nav>
+      <section class="card flush">
+        <div class="card-head"><h2>${esc(cur.title)}</h2><span class="grow"></span>
+          ${cur.def.id === 'process' ? `<label class="row small"><input type="checkbox" data-lanes ${lanes ? 'checked' : ''}> Swimlanes</label>` : ''}
+          <a class="btn sm" href="${cur.def.edit}">Edit data</a>
+          <button class="btn sm" data-z="-1" aria-label="Zoom out">−</button><button class="btn sm" data-z="1" aria-label="Zoom in">+</button>
+          <button class="btn sm" data-svg>SVG</button><button class="btn sm" data-png>PNG</button><button class="btn sm" data-mmd>Mermaid</button>
+          <button class="btn sm primary" data-copy>Customise in studio</button>
+        </div>
+        <div class="stage" data-stage>Drawing…</div>
+        <details style="padding:10px 16px"><summary class="small muted">Diagram source (Mermaid)</summary><pre class="code" style="margin-top:8px">${esc(cur.code)}</pre></details>
+      </section>
+    </div>`;
+  const stage = $('[data-stage]', root);
+  let svg = '';
+  const applyZoom = () => {
+    const el = $('svg', stage);
+    if (!el) return;
+    const vb = (el.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+    if (vb[2]) el.style.width = `${vb[2] * zoom}px`;
+  };
+  render(cur.code).then((s) => {
+    svg = s;
+    stage.innerHTML = s;
+    applyZoom();
+  }).catch((e) => (stage.innerHTML = `<div class="err">${esc(e.message)}</div>`));
+  $$('[data-z]', root).forEach((b) => (b.onclick = () => ((zoom = Math.max(0.3, Math.min(3, zoom + +b.dataset.z * 0.2))), applyZoom())));
+  $('[data-lanes]', root)?.addEventListener('change', (e) => ((lanes = e.target.checked), renderDiagrams(root, cur.key)));
+  const name = fileSafe(cur.title);
+  const need = () => svg || (toast('Still drawing…', 'err'), '');
+  $('[data-svg]', root).onclick = () => need() && download(sized(svg).svg, `${name}.svg`, 'image/svg+xml');
+  $('[data-png]', root).onclick = async () => need() && download(await svgToPng(svg, 2), `${name}.png`);
+  $('[data-mmd]', root).onclick = () => download(cur.code, `${name}.mmd`);
+  $('[data-copy]', root).onclick = () => {
+    const id = uid('dg');
+    update((pr) => pr.diagrams.push({ id, name: `${cur.title} (custom)`, code: cur.code }), { quiet: true });
+    location.hash = `#/studio/${id}`;
+  };
 }

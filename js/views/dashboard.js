@@ -1,100 +1,76 @@
-// Home: where am I, what do I do next, and quick access to the outputs.
-import { getProject, getEvaluation, getSettings } from '../store.js';
-import { generateDocs } from '../generators/docs.js';
-import { allDiagrams } from '../generators/diagrams.js';
-import { packPdf, downloadBlob } from '../export.js';
-import { esc, icon, $, busy, toast } from '../ui/dom.js';
-import { sectionRoute, sectionTitle } from './editor.js';
-import { STEPS, stepRoute } from '../ui/steps.js';
-import { stepStatus } from './build.js';
+// Dashboard: health of the analysis, what needs attention, quick links.
+import { project } from '../store.js';
+import { esc, pill } from '../ui.js';
+import { lintRequirement, riskScore, riskLevel, nameOf, businessCase } from '../model.js';
+import { rtmRows } from '../gen/exports.js';
 
-export function ring(score, size = 132) {
-  const r = (size - 14) / 2;
-  const c = 2 * Math.PI * r;
-  const kind = score >= 80 ? 'ok' : score >= 50 ? 'warn' : 'err';
-  return `<svg class="ring ${kind}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img" aria-label="Readiness ${score}%">
-    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-bg"/>
-    <circle cx="${size / 2}" cy="${size / 2}" r="${r}" class="ring-fg" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - score / 100)}" transform="rotate(-90 ${size / 2} ${size / 2})"/>
-    <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central" class="ring-text">${score}%</text>
-  </svg>`;
+/** Completeness checks across the BA lifecycle. Each returns [done, label, link]. */
+export function readiness(p) {
+  const reqs = p.requirements.filter((r) => r.status !== 'Rejected');
+  const rows = rtmRows(p);
+  return [
+    [!!(p.meta.name && p.charter.problem && p.charter.vision), 'Problem and vision defined', '#/charter'],
+    [p.charter.scopeIn.length > 0 && p.charter.scopeOut.length > 0, 'Scope in and out agreed', '#/charter'],
+    [p.objectives.length > 0 && p.objectives.every((o) => /\d/.test(o.target || '')), 'Measurable objectives', '#/c/objectives'],
+    [p.swot.length + p.pestle.length > 0, 'Strategy analysis done', '#/strategy'],
+    [p.financials.length > 0 && !!p.businessCase.recommendation, 'Business case with recommendation', '#/business-case'],
+    [p.stakeholders.length > 0 && p.stakeholders.some((s) => s.raci === 'A'), 'Stakeholders analysed, one accountable', '#/stakeholders'],
+    [p.elicitation.length > 0, 'Elicitation recorded', '#/c/elicitation'],
+    [!p.questions.some((q) => q.status === 'Open' && q.due && q.due < new Date().toISOString().slice(0, 10)), 'No overdue questions', '#/c/questions'],
+    [reqs.length > 0 && reqs.every((r) => !lintRequirement(r, p).length), 'All requirements pass quality checks', '#/c/requirements'],
+    [rows.length > 0 && rows.every((x) => x.covered || ['Business', 'Stakeholder', 'Transition'].includes(x.r.type)), 'Solution requirements covered by tests', '#/trace'],
+    [p.processes.some((x) => x.state === 'To-be'), 'To-be process modelled', '#/c/processes'],
+    [p.entities.length > 0 && p.entities.every((e) => (e.fields || []).some((f) => f.pk)), 'Data model with keys', '#/data'],
+    [p.raid.filter((r) => r.type === 'Risk' && r.status !== 'Closed').every((r) => r.response), 'Every open risk has a response', '#/c/raid'],
+    [p.tests.length > 0 && p.tests.every((t) => t.status === 'Passed'), 'UAT passed', '#/c/tests'],
+  ];
 }
-
-export function phaseStepper(ev, compact = false) {
-  return `<ol class="stepper ${compact ? 'compact' : ''}">${ev.phases
-    .map((ph) => {
-      const state = ph.approved ? 'done' : ph === ev.current ? 'now' : 'todo';
-      return `<li class="${state}"><a href="#/lifecycle?phase=${ph.phase.id}">
-        <span class="step-dot">${ph.approved ? icon('check', 13) : ph.phase.order}</span>
-        <span class="step-name">${esc(ph.phase.short)}</span>
-        ${compact ? '' : `<span class="step-meta">${ph.approved ? 'Approved' : `${ph.readiness}% ready`}</span>`}
-      </a></li>`;
-    })
-    .join('')}</ol>`;
-}
-
-const WHO = { client: 'Client', dev: 'Developers', ba: 'You' };
 
 export function renderDashboard(root) {
-  const p = getProject();
-  const ev = getEvaluation();
-  const isNew = !p.meta.name && !p.requirements.length;
-  // The first step with problems is where to continue.
-  const nextStep = STEPS.find((s) => stepStatus(s, ev) === 'err') || STEPS.find((s) => stepStatus(s, ev) === 'warn');
-  const todo = ev.issues.filter((i) => i.rule.severity === 'error').concat(ev.issues.filter((i) => i.rule.severity === 'warning')).slice(0, 5);
-  const total = ev.issues.filter((i) => i.rule.severity !== 'info').length;
+  const p = project();
+  const checks = readiness(p);
+  const done = checks.filter((c) => c[0]).length;
+  const pct = Math.round((done / checks.length) * 100);
+  const reqIssues = p.requirements.map((r) => [r, lintRequirement(r, p)]).filter(([, l]) => l.length);
+  const risks = p.raid.filter((r) => r.type === 'Risk' && r.status !== 'Closed').sort((a, b) => riskScore(b) - riskScore(a));
+  const actions = p.elicitation.flatMap((e) => (e.actions || []).filter((a) => !a.done).map((a) => ({ ...a, session: e.code })));
+  const bc = businessCase(p);
+  const stat = (n, label, href) => `<a class="stat" href="${href}"><b>${n}</b><span>${esc(label)}</span></a>`;
+  const testsPassed = p.tests.filter((t) => t.status === 'Passed').length;
 
   root.innerHTML = `
-    <div class="home">
-      <header class="home-head">
-        <div>
-          <h1>${esc(p.meta.name || 'New project')}</h1>
-          <p class="muted">${esc([p.meta.client, `Phase ${ev.current.phase.order}: ${ev.current.phase.name}`].filter(Boolean).join(' · '))}</p>
-        </div>
-        <div class="home-score">${ring(ev.score, 96)}<span class="muted small">ready</span></div>
-      </header>
-
-      <section class="card continue">
-        ${
-          isNew
-            ? `<div><h2>Let's start your project</h2><p class="muted">Answer a few questions, step by step. AutoSpec checks your answers and writes the documents and diagrams for you.</p></div>
-               <a class="btn primary lg" href="${stepRoute('basics')}">Start step 1 ${icon('chevron', 16)}</a>`
-            : nextStep
-              ? `<div><span class="muted small">Next up</span><h2>Step ${STEPS.indexOf(nextStep) + 1}: ${esc(nextStep.title)}</h2><p class="muted">${esc(nextStep.hint)}</p></div>
-                 <a class="btn primary lg" href="${stepRoute(nextStep.id)}">Continue ${icon('chevron', 16)}</a>`
-              : `<div><h2>${icon('check', 20)} All steps look good</h2><p class="muted">Review your documents, then sign off each phase.</p></div>
-                 <a class="btn primary lg" href="#/docs">Open documents ${icon('chevron', 16)}</a>`
-        }
+    <div class="page-head"><div><h1>${esc(p.meta.name || 'Untitled project')}</h1><p>${esc(p.meta.summary || 'Start with the project charter: problem, vision and scope.')}</p></div></div>
+    <div class="grid g4">
+      ${stat(p.requirements.length, 'Requirements', '#/c/requirements')}
+      ${stat(p.stories.length, `User stories · ${p.stories.reduce((a, s) => a + (+s.points || 0), 0)} pts`, '#/board')}
+      ${stat(`${testsPassed}/${p.tests.length}`, 'Tests passed', '#/c/tests')}
+      ${stat(p.financials.length ? `${bc.roi.toFixed(0)}%` : '—', 'Business case ROI', '#/business-case')}
+    </div>
+    <div class="grid g2" style="margin-top:16px">
+      <section class="card">
+        <div class="row"><h2>Analysis readiness</h2><span class="grow"></span><span class="score">${pct}%</span></div>
+        <div class="bar" style="margin:10px 0 12px"><i style="width:${pct}%"></i></div>
+        <table class="tbl"><tbody>${checks.map(([ok, label, href]) => `<tr><td style="width:28px">${ok ? '✅' : '⬜'}</td><td><a href="${href}">${esc(label)}</a></td></tr>`).join('')}</tbody></table>
       </section>
-
-      ${
-        todo.length
-          ? `<section class="card">
-              <div class="card-head-plain"><h3>To do</h3><a class="link small" href="#/quality">See all ${total} ${icon('chevron', 12)}</a></div>
-              <ul class="todo">${todo
-                .map(
-                  (i) => `<li><a href="${sectionRoute(i.rule.section)}">
-                    <span class="fix-dot ${i.rule.severity === 'error' ? 'err' : 'warn'}"></span>
-                    <span class="todo-text">${esc(i.message)}</span>
-                    <span class="who">${WHO[i.rule.audience]}</span>
-                    ${icon('chevron', 15, 'go')}</a></li>`
-                )
-                .join('')}</ul>
-            </section>`
-          : ''
-      }
-
-      <div class="quick">
-        <a class="quick-card" href="#/docs">${icon('file', 20)}<span><b>Documents</b><small>10 ready-made documents</small></span></a>
-        <a class="quick-card" href="#/diagrams">${icon('shapes', 20)}<span><b>Diagrams</b><small>Drawn from your data</small></span></a>
-        <button class="quick-card" data-pack>${icon('download', 20)}<span><b>Download PDF pack</b><small>Everything in one file</small></span></button>
+      <div>
+        <section class="card">
+          <h2>Requirement quality</h2>
+          ${reqIssues.length ? `<p class="muted small">${reqIssues.length} of ${p.requirements.length} requirements need attention.</p><table class="tbl"><tbody>${reqIssues.slice(0, 6).map(([r, l]) => `<tr><td><a href="#/c/requirements"><b>${esc(r.code)}</b></a></td><td class="small">${esc(l.join(' · '))}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">All requirements pass the quality checks.</p>'}
+        </section>
+        <section class="card">
+          <h2>Top open risks</h2>
+          ${risks.length ? `<table class="tbl"><tbody>${risks.slice(0, 4).map((r) => `<tr><td><b>${esc(r.code)}</b></td><td class="small">${esc(r.description)}</td><td>${pill(`${riskScore(r)}`, { High: 'err', Medium: 'warn', Low: 'ok' }[riskLevel(r)])}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No open risks.</p>'}
+        </section>
+        <section class="card">
+          <h2>Open actions</h2>
+          ${actions.length ? `<table class="tbl"><tbody>${actions.slice(0, 6).map((a) => `<tr><td class="small muted">${esc(a.session)}</td><td>${esc(a.action)}</td><td class="small">${esc(nameOf(p.stakeholders, a.owner))}</td><td class="small">${esc(a.due || '')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">No open actions from elicitation sessions.</p>'}
+        </section>
       </div>
-    </div>`;
-
-  $('[data-pack]', root).addEventListener('click', (e) =>
-    busy(e.currentTarget, 'Building PDF…', async (progress) => {
-      downloadBlob(await packPdf(generateDocs(p, ev), allDiagrams(p, ev, { lanes: getSettings().lanes }), p, getSettings(), progress), `${(p.meta.code || 'Project').replace(/\W+/g, '')}_Documentation_Pack.pdf`);
-      toast('PDF downloaded');
-    })
-  );
-  void sectionTitle;
+    </div>
+    <section class="card">
+      <h2>Your toolkit</h2>
+      <div class="grid g4" style="margin-top:10px">
+        ${[['#/docs', 'Documents', '18 deliverables: BRD, SRS, business case, RTM, UAT…'], ['#/diagrams', 'Diagrams', 'BPMN flows, ERD, use case, sequence, state, context…'], ['#/studio', 'Diagram studio', 'Write any Mermaid diagram from templates'], ['#/canvas', 'Whiteboard', 'Drag-and-drop flowcharts and wireframes'], ['#/board', 'Backlog board', 'Drag stories across the workflow'], ['#/prioritise', 'Prioritisation', 'MoSCoW, RICE and WSJF'], ['#/trace', 'Traceability', 'Objective → requirement → story → test'], ['#/settings', 'Exports', 'OpenAPI, SQL, JSON Schema, CSV, project file']].map(([h, t, d]) => `<a class="stat" href="${h}"><b style="font-size:15px">${t}</b><span>${d}</span></a>`).join('')}
+      </div>
+    </section>`;
 }

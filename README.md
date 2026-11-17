@@ -1,101 +1,95 @@
-# AutoSpec Studio
+# BA Builder
 
-A rule-based business analysis studio. You enter project information step by step,
-following the SDLC phases in order, and AutoSpec:
+A complete workspace for **Technical Business Analysts** — from strategy and elicitation,
+through requirements and solution modelling, to diagrams, documentation and technical
+specifications. Plain HTML, CSS and JavaScript: no build step, no server, no account.
 
-- **checks everything** with 50+ deterministic rules (requirement quality, traceability,
-  MoSCoW, RACI, RAID, data model, process flow and phase-gate rules),
-- **tells each person what to do next** — client, delivery team and business analyst,
-- **writes the documents** — Project Charter, BRD, SRS, User Stories with Gherkin,
-  Traceability Matrix (+ CSV), Solution Design & Data Spec, Test Plan, RAID & Decision
-  Log, Deployment & Handover Plan, Phase Gate Report,
-- **draws the diagrams** — process flow (swimlanes), sequence, ERD, architecture,
-  use cases, SDLC lifecycle and release roadmap — each with a plain-English description,
-- **reads documents and diagram descriptions aloud** (browser speech, no server),
-- **exports** branded PDFs, a full documentation pack PDF and a ZIP of everything.
+## What it covers
 
-There is **no AI**. The same input always produces the same output.
+| Area | Tools |
+| --- | --- |
+| **Strategy** | Project charter (problem, vision, scope), SMART objectives, SWOT, PESTLE, gap analysis (as-is → to-be), business case with NPV / ROI / payback |
+| **Stakeholders** | Register, power/interest grid, editable RACI matrix, personas & actors, elicitation sessions (interviews, workshops, observation…) with actions, open questions |
+| **Requirements** | Business / stakeholder / functional / non-functional / data / interface / transition requirements with a live quality checker (ambiguous words, missing "shall", untestable NFRs, missing acceptance criteria, untraced items) |
+| **Agile** | User stories with Given/When/Then, drag-and-drop backlog board, MoSCoW · RICE · WSJF prioritisation, value-vs-effort chart, releases |
+| **Analysis models** | Fully dressed use cases, business rules, decision tables (with missing-combination check), UAT test cases |
+| **Solution design** | Swimlane process models (as-is / to-be, pain points), logical data model, state machines, API endpoints, integrations |
+| **Control** | RAID log with risk scoring, decision log, change requests with impact analysis, glossary |
+| **Traceability** | RTM, objective coverage matrix, trace graph and an impact explorer (what changes if this requirement changes?) |
 
-## Run it locally
+### Diagrams
+Generated from your data, always in sync: system context, BPMN-style process flows,
+use case, sequence (from use case flows), state machine, ERD, class, decision flow,
+stakeholder map, traceability graph, value vs effort, scope mind map, release roadmap.
 
-The app is plain HTML, CSS and JavaScript modules — no build step. Browsers only load
-JavaScript modules over `http://`, so serve the folder with any static server, then open
-the address it prints:
+Plus:
+- **Diagram studio** — any Mermaid diagram with live preview and 17 BA templates
+  (flowchart, swimlanes, sequence, class, ERD, state, activity, journey, mind map, Gantt,
+  timeline, quadrant, pie, C4 context, fishbone, org chart, use case).
+- **Whiteboard** — drag-and-drop flowcharts and low-fidelity wireframes with connectors,
+  pan/zoom, and SVG/PNG/JSON export.
 
-```bash
-npx serve .
-```
+### Documents (18)
+Project Charter · Business Case · Strategy Analysis · Stakeholder Analysis & Engagement Plan ·
+Elicitation Report & Minutes · BRD · SRS (ISO/IEC/IEEE 29148 structure) · Use Case
+Specifications · Product Backlog · Process Documentation · Data Dictionary · API & Interface
+Specification · Traceability Matrix · UAT Plan & Results · RAID & Decision Log · Change
+Request Log · Release & Transition Plan · Glossary.
 
-or, with Python installed:
+Each exports to **Word (.doc)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
+
+### Technical exports
+OpenAPI 3.0 YAML · PostgreSQL DDL · JSON Schema · RTM CSV · every register as CSV ·
+a complete ZIP pack · the project file (JSON) for backup and sharing.
+Requirements, stories, stakeholders, RAID, tests, questions and glossary can be imported from CSV.
+
+## Run it
+
+Browsers only load JavaScript modules over `http://`, so serve the folder:
 
 ```bash
 python -m http.server 8080
 ```
 
-## Host it on GitHub Pages
+or
 
-1. Create a new repository on GitHub and upload the contents of this folder
-   (`index.html` must be at the top level).
-2. In the repository go to **Settings → Pages**.
-3. Under **Build and deployment**, choose **Deploy from a branch**, select `main` and
-   `/ (root)`, then **Save**.
-4. After a minute the site is live at `https://<your-user>.github.io/<repository>/`.
+```bash
+npx serve .
+```
 
-The `.nojekyll` file tells GitHub Pages to serve the files exactly as they are.
+Then open http://localhost:8080. An example project (a fictional bank's digital loan
+origination) loads on first run so every screen has content; add your own projects under
+**Projects & export**.
 
-## What a static site can and cannot do
+### GitHub Pages
+Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The `.nojekyll` file makes
+Pages serve the files as they are.
 
-- Everything runs in the visitor's browser. Projects are saved in that browser's local
-  storage; use **Export → Project file** to back up, move or share a project.
-- The diagram, PDF and ZIP libraries (Mermaid, jsPDF, JSZip) load from the jsDelivr CDN
-  the first time they are used, so those features need an internet connection.
-- Updates show up on the next page load: a small service worker (`sw.js`) always checks
-  for newer files instead of waiting for GitHub Pages' 10-minute cache. It also lets the app
-  open offline after the first visit.
-- Several people editing the same project at the same time would need a server and
-  database; that is not part of a static site.
-- **Code import** reads source files as text and recognises structure (endpoints, tables,
-  classes, dependencies, configuration names) with patterns for ~15 languages. It never
-  runs or changes the code, and it cannot know business intent — review the results with
-  the development team. Files that may hold secrets (`.env`, private keys) are skipped.
-- **Notes import** recognises standard phrasing ("As a … I want … so that …", "shall",
-  "must", Given/When/Then, "Decision:", "Risk:", questions). Every suggestion is confirmed
-  by a person before it is added.
+## Notes
+- Data lives in your browser's local storage. Export the project file to back it up or
+  move it to another machine.
+- Diagrams use [Mermaid](https://mermaid.js.org) and the ZIP export uses JSZip, both loaded
+  from the jsDelivr CDN on first use (internet needed for those features).
+- Undo with **Ctrl+Z**.
 
 ## Project structure
 
 ```
-index.html              App entry point
-sw.js                   Service worker: fresh updates + offline support
-assets/app.css          Design system (light + dark themes, responsive)
-js/main.js              Layout, navigation and routing
-js/store.js             Project + settings state, autosave, undo
-js/model.js             Data model, defaults and helpers
-js/sdlc.js              SDLC phases, PLC stages, entry/exit criteria, checklists
-js/rules.js             Rules engine (all quality checks and phase gates)
-js/generators/docs.js   Document templates
-js/generators/diagrams.js  Diagram builders and spoken descriptions
-js/markdown.js          Markdown parser used by the viewer, PDF and Read Aloud
-js/export.js            Mermaid rendering, PDF (jsPDF) and ZIP (JSZip) export
-js/speech.js            Read Aloud (Web Speech API)
-js/importers/           Notes, code and CSV importers
-js/ui/                  DOM helpers, form engine, editor schema
-js/views/               One file per screen
-js/sample.js            Example project
-tests/                  Node tests for the rules, generators and importers
+index.html            entry point
+css/app.css           design tokens, light/dark themes, responsive layout
+js/app.js             shell, navigation, router
+js/model.js           data model: every artefact is a schema-described collection
+js/store.js           projects, local storage, undo
+js/sample.js          example project
+js/ui.js              DOM helpers, modals, schema-driven forms
+js/markdown.js        Markdown → HTML for documents
+js/mermaid.js         Mermaid loader, SVG/PNG export
+js/gen/docs.js        document templates
+js/gen/diagrams.js    diagram generators
+js/gen/exports.js     CSV, OpenAPI, SQL, JSON Schema, RTM
+js/views/             one file per screen
+tests/smoke.mjs       node tests/smoke.mjs — builds every document, diagram and export
 ```
 
-## Adding or changing a rule
-
-Rules live in `js/rules.js`. Each rule states its phase, severity (`error` blocks the
-phase gate, `warning`, `info`), who must act (`client`, `dev`, `ba`), why it matters, and
-a `check(project)` function that returns the problems it found. New rules appear
-automatically on the dashboard, the Quality check page, the phase gates and the Phase Gate
-report.
-
-## Tests
-
-```bash
-node tests/smoke.mjs
-node tests/importers.mjs
-```
+Adding a new artefact type is usually just a new entry in `COLLECTIONS` in `js/model.js`:
+the list, editor, search, filters and CSV export come for free.

@@ -1,137 +1,106 @@
-// App state: the active project and user settings, persisted in the browser.
-import { normalizeProject, blankProject } from './model.js';
+// State: several projects kept in browser storage, autosave and undo.
+import { normalize, blankProject } from './model.js';
 import { sampleProject } from './sample.js';
-import { evaluate } from './rules.js';
 
-const PROJECT_KEY = 'autospec.project.v1';
-const SETTINGS_KEY = 'autospec.settings.v1';
-
-export const DEFAULT_SETTINGS = {
-  company: 'AutoSpec',
-  accent: '#4f46e5',
-  logo: '',
-  footer: 'Confidential',
-  theme: 'auto',
-  voiceURI: '',
-  rate: 1,
-  lanes: true,
+const KEY = 'bab.workspace';
+const SKEY = 'bab.settings';
+const safe = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 
-const storage = {
-  get(key) {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  },
-  set(key, value) {
-    try {
-      localStorage.setItem(key, value);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-};
-
-let project = null;
-let settings = { ...DEFAULT_SETTINGS };
-let cachedEval = null;
+let ws = { current: null, projects: {} };
+let settings = { theme: 'auto', org: '', author: '', currency: 'R' };
 const listeners = new Set();
 const undoStack = [];
-let lastSnapshotAt = 0;
-let saveOk = true;
+let lastSnap = 0;
+export let saved = true;
 
 export function load() {
-  const raw = storage.get(PROJECT_KEY);
-  let firstRun = false;
-  try {
-    project = raw ? normalizeProject(JSON.parse(raw)) : null;
-  } catch {
-    project = null;
+  try { ws = JSON.parse(safe.get(KEY) || 'null') || ws; } catch { /* corrupt storage: start fresh */ }
+  try { settings = { ...settings, ...JSON.parse(safe.get(SKEY) || '{}') }; } catch { /* ignore */ }
+  for (const id of Object.keys(ws.projects || {})) ws.projects[id] = normalize(ws.projects[id]);
+  if (!ws.projects || !Object.keys(ws.projects).length) {
+    const s = sampleProject();
+    ws = { current: s.id, projects: { [s.id]: s } };
+    persist();
+    return { firstRun: true };
   }
-  if (!project) {
-    project = sampleProject();
-    firstRun = true;
-  }
-  try {
-    settings = { ...DEFAULT_SETTINGS, ...(JSON.parse(storage.get(SETTINGS_KEY) || '{}') || {}) };
-  } catch {
-    settings = { ...DEFAULT_SETTINGS };
-  }
-  cachedEval = null;
-  return { firstRun };
+  if (!ws.projects[ws.current]) ws.current = Object.keys(ws.projects)[0];
+  return { firstRun: false };
 }
 
-export const getProject = () => project;
+const persist = () => (saved = safe.set(KEY, JSON.stringify(ws)));
+const emit = (info = {}) => listeners.forEach((fn) => fn(info));
+
+export const project = () => ws.projects[ws.current];
+export const projects = () => Object.values(ws.projects).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 export const getSettings = () => settings;
+export const subscribe = (fn) => (listeners.add(fn), () => listeners.delete(fn));
 export const canUndo = () => undoStack.length > 0;
-export const lastSaveOk = () => saveOk;
 
-/** Evaluation is cached until the project changes. */
-export function getEvaluation() {
-  if (!cachedEval) cachedEval = evaluate(project);
-  return cachedEval;
-}
-
-function persist() {
-  saveOk = storage.set(PROJECT_KEY, JSON.stringify(project));
-}
-
-function emit(info) {
-  for (const fn of listeners) fn(info);
-}
-
-export function subscribe(fn) {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
-
-function snapshot(mode) {
+/** Mutate the current project. `quiet` = do not re-render (used while typing). */
+export function update(fn, { quiet = false, typing = false } = {}) {
   const now = Date.now();
-  if (mode === 'typing' && now - lastSnapshotAt < 2500) return;
-  lastSnapshotAt = now;
-  undoStack.push(JSON.stringify(project));
-  if (undoStack.length > 40) undoStack.shift();
-}
-
-/**
- * Change the project. `mutator` edits the project in place.
- * opts.rerender=false is used while typing so the form keeps focus.
- */
-export function update(mutator, opts = {}) {
-  snapshot(opts.typing ? 'typing' : 'action');
-  mutator(project);
-  project.updatedAt = new Date().toISOString();
-  cachedEval = null;
+  if (!typing || now - lastSnap > 2500) {
+    undoStack.push(JSON.stringify(project()));
+    if (undoStack.length > 50) undoStack.shift();
+    lastSnap = now;
+  }
+  fn(project());
+  project().updatedAt = new Date().toISOString();
   persist();
-  emit({ rerender: opts.rerender !== false });
+  emit({ rerender: !quiet });
 }
 
 export function undo() {
   const prev = undoStack.pop();
   if (!prev) return false;
-  project = normalizeProject(JSON.parse(prev));
-  cachedEval = null;
+  const p = normalize(JSON.parse(prev));
+  ws.projects[p.id] = p;
+  ws.current = p.id;
   persist();
   emit({ rerender: true });
   return true;
 }
 
-export function replaceProject(p) {
-  snapshot('action');
-  project = normalizeProject(p);
-  cachedEval = null;
+export function switchProject(id) {
+  if (!ws.projects[id]) return;
+  ws.current = id;
+  undoStack.length = 0;
   persist();
   emit({ rerender: true });
 }
 
-export const newBlankProject = () => replaceProject(blankProject());
-export const loadSample = () => replaceProject(sampleProject());
+export function addProject(p) {
+  p = normalize(p);
+  ws.projects[p.id] = p;
+  ws.current = p.id;
+  undoStack.length = 0;
+  persist();
+  emit({ rerender: true });
+  return p;
+}
+export const newProject = (name) => addProject(blankProject(name));
+export const loadSample = () => {
+  const s = sampleProject();
+  s.id = `prj_sample_${Date.now().toString(36)}`;
+  return addProject(s);
+};
 
-export function updateSettings(patch) {
+export function deleteProject(id) {
+  delete ws.projects[id];
+  if (!Object.keys(ws.projects).length) {
+    const p = blankProject('New project');
+    ws.projects[p.id] = p;
+  }
+  if (!ws.projects[ws.current]) ws.current = Object.keys(ws.projects)[0];
+  persist();
+  emit({ rerender: true });
+}
+
+export function saveSettings(patch) {
   settings = { ...settings, ...patch };
-  storage.set(SETTINGS_KEY, JSON.stringify(settings));
-  emit({ rerender: false, settings: true });
+  safe.set(SKEY, JSON.stringify(settings));
+  emit({ rerender: true, settings: true });
 }
