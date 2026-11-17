@@ -1,7 +1,7 @@
 // Dashboard: health of the analysis, what needs attention, quick links.
 import { project } from '../store.js';
 import { esc, pill } from '../ui.js';
-import { lintRequirement, riskScore, riskLevel, nameOf, businessCase } from '../model.js';
+import { today, lintRequirement, riskScore, riskLevel, nameOf, businessCase } from '../model.js';
 import { rtmRows } from '../gen/exports.js';
 import { STEPS, startNewSrs } from './wizard.js';
 
@@ -17,7 +17,7 @@ export function readiness(p) {
     [p.financials.length > 0 && !!p.businessCase.recommendation, 'Business case with recommendation', '#/business-case'],
     [p.stakeholders.length > 0 && p.stakeholders.some((s) => s.raci === 'A'), 'Stakeholders analysed, one accountable', '#/stakeholders'],
     [p.elicitation.length > 0, 'Elicitation recorded', '#/c/elicitation'],
-    [!p.questions.some((q) => q.status === 'Open' && q.due && q.due < new Date().toISOString().slice(0, 10)), 'No overdue questions', '#/c/questions'],
+    [!p.questions.some((q) => q.status === 'Open' && q.due && q.due < today()), 'No overdue questions', '#/c/questions'],
     [reqs.length > 0 && reqs.every((r) => !lintRequirement(r, p).length), 'All requirements pass quality checks', '#/c/requirements'],
     [rows.length > 0 && rows.every((x) => x.covered || ['Business', 'Stakeholder', 'Transition'].includes(x.r.type)), 'Solution requirements covered by tests', '#/trace'],
     [p.processes.some((x) => x.state === 'To-be'), 'To-be process modelled', '#/c/processes'],

@@ -32,7 +32,7 @@ export function mdToHtml(md) {
       i += 2;
       const rows = [];
       while (i < lines.length && /^\|/.test(lines[i])) rows.push(cells(lines[i++]));
-      out.push(`<table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      out.push(`<div class="tscroll"><table><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
       continue;
     }
     if (/^\s*([-*]|\d+\.)\s+/.test(l)) {

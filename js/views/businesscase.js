@@ -15,9 +15,10 @@ export function renderBusinessCase(root) {
     <div class="grid g4">
       <div class="stat"><b style="color:${bc.npv >= 0 ? 'var(--ok)' : 'var(--err)'}">${m(bc.npv)}</b><span>Net present value @ ${(bc.rate * 100).toFixed(1)}%</span></div>
       <div class="stat"><b>${bc.roi.toFixed(1)}%</b><span>Return on investment</span></div>
-      <div class="stat"><b>${bc.payback === null ? '—' : `Year ${bc.payback}`}</b><span>Payback</span></div>
-      <div class="stat"><b>${m(bc.totalBen - bc.totalCost)}</b><span>Net benefit (undiscounted)</span></div>
+      <div class="stat"><b>${bc.paybackExact === null ? '—' : `${bc.paybackExact.toFixed(1)} yrs`}</b><span>Payback${bc.discountedPayback === null ? '' : ` · discounted ${bc.discountedPayback.toFixed(1)} yrs`}</span></div>
+      <div class="stat"><b>${bc.irr === null ? '—' : `${(bc.irr * 100).toFixed(1)}%`}</b><span>Internal rate of return · net ${m(bc.totalBen - bc.totalCost)}</span></div>
     </div>
+    ${bc.outside.length ? `<div class="callout warn" style="margin-top:16px">${bc.outside.length} item(s) fall outside the ${bc.years}-year horizon (or use a part year) and are not counted: ${bc.outside.map((f) => esc(`${f.item} (year ${f.year})`)).join(', ')}. Increase the horizon or use whole years 0–${bc.years}.</div>` : ''}
     <div class="grid g2" style="margin-top:16px">
       <section class="card">
         <h2 style="margin-bottom:10px">Assumptions</h2>

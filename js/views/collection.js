@@ -86,6 +86,8 @@ export function openItem(key, id, preset = {}) {
     const missing = c.fields.filter((f) => f.req && (Array.isArray(vals[f.key]) ? !vals[f.key].length : String(vals[f.key] ?? '').trim() === ''));
     if (missing.length) return toast(`Please fill in: ${missing.map((f) => f.label).join(', ')}`, 'err');
     const merged = { ...item, ...vals };
+    const invalid = c.validate?.(merged, p);
+    if (invalid) return toast(invalid, 'err');
     if (merged.code && p[key].some((x) => x.code === merged.code && x.id !== merged.id)) return toast(`ID ${merged.code} is already used`, 'err');
     update((pr) => {
       ensureCode(key, merged, pr[key]);

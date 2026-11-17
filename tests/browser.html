@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BA Builder tests</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #000; color: #f2f2f2; font: 14px/1.5 'Segoe UI', Arial, sans-serif; margin: 0; padding: 16px; }
+  h1 { margin: 0 0 4px; border-left: 4px solid #ef4444; padding-left: 10px; }
+  .sum { font-size: 18px; margin: 12px 0; }
+  .ok { color: #22c55e; } .no { color: #f87171; }
+  table { border-collapse: collapse; width: 100%; max-width: 1100px; }
+  td, th { border-bottom: 1px solid #242424; padding: 4px 8px; text-align: left; vertical-align: top; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  pre { white-space: pre-wrap; color: #f87171; margin: 0; font-size: 12px; }
+  #stage { position: absolute; left: -99999px; top: 0; width: 1600px; }
+</style>
+</head>
+<body>
+<h1>BA Builder — browser tests</h1>
+<p>Renders every generated diagram (screen and print themes), every studio template, and every diagram of a very large stress-test project. Serve the folder and open <code>/tests/browser.html</code>.</p>
+<div class="sum" id="sum">Running…</div>
+<table><thead><tr><th>Group</th><th>Diagram</th><th>Result</th><th class="num">Source</th><th class="num">ms</th></tr></thead><tbody id="rows"></tbody></table>
+<div id="stage"></div>
+<script type="module">
+  import { render } from '../js/mermaid.js';
+  import { allDiagrams } from '../js/gen/diagrams.js';
+  import { sampleProject } from '../js/sample.js';
+  import { blankProject } from '../js/model.js';
+  import { bigProject } from './big-project.js';
+  import { TEMPLATES } from '../js/views/studio.js';
+
+  const rows = document.getElementById('rows');
+  const sum = document.getElementById('sum');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const results = [];
+  async function check(group, title, code, light = false) {
+    const t0 = performance.now();
+    let ok = true, msg = '';
+    try {
+      const svg = await render(code, { light });
+      if (!/<svg[\s>]/.test(svg)) throw new Error('No SVG produced');
+      if (/Syntax error in text/i.test(svg)) throw new Error('Mermaid syntax error');
+      // put it in the page so layout really happens, then measure
+      const stage = document.getElementById('stage');
+      stage.innerHTML = svg;
+      const box = stage.querySelector('svg').getBoundingClientRect();
+      if (!(box.width > 10 && box.height > 10)) throw new Error(`Empty drawing (${Math.round(box.width)}×${Math.round(box.height)})`);
+      stage.innerHTML = '';
+    } catch (e) { ok = false; msg = e.message || String(e); }
+    const ms = Math.round(performance.now() - t0);
+    if (ok && ms > 10000) { ok = false; msg = `Too slow: ${ms} ms (limit 10 000 ms) — the app would freeze`; }
+    results.push({ group, title, ok, ms });
+    rows.insertAdjacentHTML('beforeend', `<tr><td>${esc(group)}</td><td>${esc(title)}</td><td class="${ok ? 'ok' : 'no'}">${ok ? '✔ rendered' : `✖<pre>${esc(msg.slice(0, 400))}</pre>`}</td><td class="num">${(code.length / 1024).toFixed(1)} KB</td><td class="num">${ms}</td></tr>`);
+    sum.textContent = `Running… ${results.length} done`;
+  }
+
+  const projects = [['Sample', sampleProject()], ['Blank', blankProject('Blank')], ['Stress x1', bigProject(1)]];
+  for (const [name, p] of projects) for (const d of allDiagrams(p)) await check(name, d.title, d.code);
+  // three times bigger again: only the whole-project diagrams (the per-item ones are the same size as x1)
+  for (const d of allDiagrams(bigProject(3)).filter((x) => !x.def?.per)) await check('Stress x3', d.title, d.code);
+  for (const d of allDiagrams(sampleProject())) await check('Sample (print theme)', d.title, d.code, true);
+  for (const [name, code] of Object.entries(TEMPLATES)) await check('Studio templates', name, code);
+
+  const bad = results.filter((r) => !r.ok);
+  const slow = results.reduce((a, r) => (r.ms > a.ms ? r : a), { ms: 0 });
+  sum.innerHTML = bad.length
+    ? `<span class="no">✖ ${bad.length} of ${results.length} diagrams failed</span>`
+    : `<span class="ok">✔ All ${results.length} diagrams rendered</span> <span style="color:#8c8c8c">— slowest: ${esc(slow.title)} (${slow.ms} ms)</span>`;
+  window.__results = { total: results.length, failed: bad.map((r) => `${r.group}: ${r.title}`), slowest: slow };
+</script>
+</body>
+</html>

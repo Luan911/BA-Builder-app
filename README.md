@@ -20,6 +20,8 @@ Click **+ New SRS** (top of the sidebar) and follow 10 guided steps:
 10. Review & export — completeness checklist, live preview, download as Word, PDF or Markdown
 
 Each step explains what to write, gives an example, and turns green when it is complete.
+If a step is not green yet, a **To finish this step** box at the top lists exactly what is
+missing (for example “NFR-004: Not traced to an objective”); click a line to open and fix it.
 You can leave at any time and continue later from **SRS wizard** in the sidebar.
 
 ## Look
@@ -31,7 +33,8 @@ light version so they print cleanly on white paper.
 
 | Area | Tools |
 | --- | --- |
-| **Strategy** | Project charter (problem, vision, scope), SMART objectives, SWOT, PESTLE, gap analysis (as-is → to-be), business case with NPV / ROI / payback |
+| **Strategy** | Project charter (problem, vision, scope), SMART objectives, SWOT, PESTLE, gap analysis (as-is → to-be), business case with NPV / ROI / IRR / payback / discounted payback |
+| **Cost & time** | Team day rates, three-point (PERT) work estimates, cost with contingency, 50/80/90/95% confidence range, phase schedule on a working-day calendar (weekends, public holidays), finish date vs target, sprint forecast from velocity, one click to feed the business case |
 | **Stakeholders** | Register, power/interest grid, editable RACI matrix, personas & actors, elicitation sessions (interviews, workshops, observation…) with actions, open questions |
 | **Requirements** | Business / stakeholder / functional / non-functional / data / interface / transition requirements with a live quality checker (ambiguous words, missing "shall", untestable NFRs, missing acceptance criteria, untraced items) |
 | **Agile** | User stories with Given/When/Then, drag-and-drop backlog board, MoSCoW · RICE · WSJF prioritisation, value-vs-effort chart, releases |
@@ -43,7 +46,9 @@ light version so they print cleanly on white paper.
 ### Diagrams
 Generated from your data, always in sync: system context, BPMN-style process flows,
 use case, sequence (from use case flows), state machine, ERD, class, decision flow,
-stakeholder map, traceability graph, value vs effort, scope mind map, release roadmap.
+stakeholder map, traceability graph, value vs effort, scope mind map, release roadmap,
+delivery schedule (Gantt from the estimate). Very large projects get condensed versions of the
+trace graph, ERD and class diagram so the page never freezes; the matrix and documents keep every item.
 
 Plus:
 - **Diagram studio** — any Mermaid diagram with live preview and 17 BA templates
@@ -52,12 +57,12 @@ Plus:
 - **Whiteboard** — drag-and-drop flowcharts and low-fidelity wireframes with connectors,
   pan/zoom, and SVG/PNG/JSON export.
 
-### Documents (18)
+### Documents (19)
 Project Charter · Business Case · Strategy Analysis · Stakeholder Analysis & Engagement Plan ·
 Elicitation Report & Minutes · BRD · SRS (ISO/IEC/IEEE 29148 structure) · Use Case
 Specifications · Product Backlog · Process Documentation · Data Dictionary · API & Interface
 Specification · Traceability Matrix · UAT Plan & Results · RAID & Decision Log · Change
-Request Log · Release & Transition Plan · Glossary.
+Request Log · Release & Transition Plan · Cost & Schedule Estimate · Glossary.
 
 Each exports to **Word (.doc)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
 
@@ -95,11 +100,36 @@ Pages serve the files as they are.
   from the jsDelivr CDN on first use (internet needed for those features).
 - Undo with **Ctrl+Z**.
 
+## Tests
+
+```bash
+node tests/unit.mjs
+```
+147 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
+every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+
+```bash
+node tests/smoke.mjs
+```
+Builds every document, diagram and export for the example project and an empty one.
+
+```bash
+node tests/stress.mjs
+```
+A generated project of 2 000–6 600 items full of awkward text (quotes, pipes, `#`, `;`, brackets,
+emoji, Chinese, very long names) must build every document, diagram and export with no
+`undefined` / `NaN`, in seconds.
+
+**In the browser:** serve the folder and open `http://localhost:8080/tests/browser.html`. It draws all
+137 diagrams (example, empty, stress x1 and x3 projects, print theme, studio templates) and fails any that
+error, come out empty or take longer than 10 seconds.
+
 ## Project structure
 
 ```
 index.html            entry point
-css/app.css           design tokens, light/dark themes, responsive layout
+css/app.css           dark theme tokens, responsive layout, print styles
 js/app.js             shell, navigation, router
 js/model.js           data model: every artefact is a schema-described collection
 js/store.js           projects, local storage, undo
@@ -111,7 +141,9 @@ js/gen/docs.js        document templates
 js/gen/diagrams.js    diagram generators
 js/gen/exports.js     CSV, OpenAPI, SQL, JSON Schema, RTM
 js/views/             one file per screen
-tests/smoke.mjs       node tests/smoke.mjs — builds every document, diagram and export
+js/estimate.js        cost & time maths: PERT, working-day calendar, schedule
+js/templates.js       NFR templates used by the SRS wizard
+tests/                automated tests (see below)
 ```
 
 Adding a new artefact type is usually just a new entry in `COLLECTIONS` in `js/model.js`:

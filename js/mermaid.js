@@ -21,6 +21,8 @@ function lib(mode) {
       mm.initialize({
         startOnLoad: false,
         securityLevel: 'strict',
+        maxTextSize: 2000000, // large projects produce big diagrams (default limit is 50 000 chars)
+        maxEdges: 5000,
         theme: 'base',
         fontFamily: 'Segoe UI, Arial, sans-serif',
         themeVariables: THEMES[mode],

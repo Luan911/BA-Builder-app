@@ -6,6 +6,7 @@ import { renderDashboard } from './views/dashboard.js';
 import { renderCharter } from './views/charter.js';
 import { renderStrategy } from './views/strategy.js';
 import { renderBusinessCase } from './views/businesscase.js';
+import { renderEstimate } from './views/estimate.js';
 import { renderStakeholders } from './views/stakeholders.js';
 import { renderBoard } from './views/board.js';
 import { renderPrioritise } from './views/prioritise.js';
@@ -21,7 +22,7 @@ import { renderWizard, startNewSrs } from './views/wizard.js';
 // [route, label, count-key]
 const NAV = [
   ['Overview', [['', 'Dashboard'], ['srs', 'SRS wizard (step by step)'], ['charter', 'Project charter']]],
-  ['Strategy', [['c/objectives', 'Objectives', 'objectives'], ['strategy', 'SWOT & PESTLE'], ['c/gaps', 'Gap analysis', 'gaps'], ['business-case', 'Business case']]],
+  ['Strategy', [['c/objectives', 'Objectives', 'objectives'], ['strategy', 'SWOT & PESTLE'], ['c/gaps', 'Gap analysis', 'gaps'], ['business-case', 'Business case'], ['estimate', 'Cost & time estimate', 'workItems']]],
   ['Stakeholders', [['stakeholders', 'Stakeholders & RACI', 'stakeholders'], ['c/personas', 'Personas & actors', 'personas'], ['c/elicitation', 'Elicitation sessions', 'elicitation'], ['c/questions', 'Open questions', 'questions']]],
   ['Requirements', [['c/requirements', 'Requirements', 'requirements'], ['c/stories', 'User stories', 'stories'], ['board', 'Backlog board'], ['prioritise', 'Prioritisation'], ['c/usecases', 'Use cases', 'usecases'], ['c/rules', 'Business rules', 'rules'], ['decision-tables', 'Decision tables', 'decisionTables'], ['c/tests', 'Test cases (UAT)', 'tests'], ['trace', 'Traceability']]],
   ['Solution design', [['c/processes', 'Process models', 'processes'], ['data', 'Data model', 'entities'], ['c/states', 'State machines', 'states'], ['c/apis', 'API endpoints', 'apis'], ['c/integrations', 'Integrations', 'integrations']]],
@@ -75,6 +76,7 @@ function route() {
     else if (a === 'charter') renderCharter(v);
     else if (a === 'strategy') renderStrategy(v);
     else if (a === 'business-case') renderBusinessCase(v);
+    else if (a === 'estimate') renderEstimate(v);
     else if (a === 'stakeholders') renderStakeholders(v);
     else if (a === 'board') renderBoard(v);
     else if (a === 'prioritise') renderPrioritise(v);

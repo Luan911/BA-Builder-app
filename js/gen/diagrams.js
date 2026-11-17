@@ -1,10 +1,24 @@
 // Diagram generators: Mermaid source built from project data, always in sync.
 import { byId, nameOf, rice, wsjf } from '../model.js';
+import { estimate, daysBetween } from '../estimate.js';
 
 const q = (s) => `"${String(s ?? '').replace(/["“”]/g, "'").replace(/[\r\n]+/g, ' ').replace(/[<>{}[\]|#;]/g, ' ').trim() || ' '}"`;
 const id = (pre, s) => `${pre}_${String(s ?? '').replace(/[^A-Za-z0-9]/g, '_') || 'x'}`;
 const word = (s) => String(s ?? '').replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() || 'Item';
 const ident = (s) => String(s ?? '').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1') || 'Unnamed';
+
+// Above these sizes diagrams switch to a condensed view: Mermaid's layout time grows
+// much faster than the number of boxes, and a 60-second freeze helps nobody.
+export const LIMITS = { traceNodes: 150, traceSummaryReqs: 80, modelEntities: 25, erdMax: 70, classMax: 40 };
+
+/** For very big data models: keep the most-connected entities. Returns { list, hidden }. */
+function topEntities(p, max) {
+  if (p.entities.length <= max) return { list: p.entities, hidden: 0 };
+  const degree = new Map(p.entities.map((e) => [e.id, 0]));
+  for (const r of p.relationships) for (const k of [r.from, r.to]) if (degree.has(k)) degree.set(k, degree.get(k) + 1);
+  const keep = new Set([...p.entities].sort((a, b) => degree.get(b.id) - degree.get(a.id)).slice(0, max).map((e) => e.id));
+  return { list: p.entities.filter((e) => keep.has(e.id)), hidden: p.entities.length - keep.size };
+}
 
 const STYLE = [
   'classDef start fill:#0d2416,stroke:#22c55e,stroke-width:2px,color:#f2f2f2',
@@ -101,10 +115,15 @@ export function sequenceDiagram(p, uc) {
 const CARD = { 'one-to-one': '||--||', 'one-to-many': '||--o{', 'many-to-many': '}o--o{', 'zero-or-one-to-many': '|o--o{' };
 export function erd(p) {
   const L = ['erDiagram'];
-  for (const e of p.entities) {
+  const compact = p.entities.length > LIMITS.modelEntities;
+  const { list: ents, hidden } = topEntities(p, LIMITS.erdMax);
+  if (hidden) L.push(`  MORE_ENTITIES_NOT_SHOWN { string hidden_${hidden}_entities "see the data dictionary" }`);
+  for (const e of ents) {
     L.push(`  ${ident(e.name)} {`);
-    for (const f of e.fields || []) {
-      if (!f.name) continue;
+    const fields = (e.fields || []).filter((f) => f.name);
+    const shown = compact ? fields.filter((f) => f.pk || f.fk || f.unique) : fields;
+    if (compact && shown.length < fields.length) L.push(`    string more_${fields.length - shown.length}_fields`);
+    for (const f of shown) {
       const keys = [f.pk && 'PK', f.fk && 'FK', f.unique && !f.pk && 'UK'].filter(Boolean).join(', ');
       L.push(`    ${ident(f.type || 'string')} ${ident(f.name)}${keys ? ` ${keys}` : ''}`);
     }
@@ -112,13 +131,13 @@ export function erd(p) {
   }
   const pairs = new Set();
   for (const r of p.relationships) {
-    const a = byId(p.entities, r.from), b = byId(p.entities, r.to);
+    const a = byId(ents, r.from), b = byId(ents, r.to);
     if (!a || !b) continue;
     pairs.add(`${a.name}>${b.name}`);
     L.push(`  ${ident(a.name)} ${CARD[r.card] || '||--o{'} ${ident(b.name)} : ${q(r.label || 'relates to')}`);
   }
-  for (const e of p.entities) for (const f of e.fields || []) {
-    if (f.fk && p.entities.some((x) => x.name === f.fk) && !pairs.has(`${f.fk}>${e.name}`)) {
+  for (const e of ents) for (const f of e.fields || []) {
+    if (f.fk && ents.some((x) => x.name === f.fk) && !pairs.has(`${f.fk}>${e.name}`)) {
       pairs.add(`${f.fk}>${e.name}`);
       L.push(`  ${ident(f.fk)} ||--o{ ${ident(e.name)} : ${q(f.name)}`);
     }
@@ -130,16 +149,22 @@ export function erd(p) {
 // ---------- Class diagram ----------
 export function classDiagram(p) {
   const L = ['classDiagram'];
-  for (const e of p.entities) {
+  const compact = p.entities.length > LIMITS.modelEntities;
+  const { list: ents, hidden } = topEntities(p, LIMITS.classMax);
+  if (hidden) L.push(`  class More_${hidden}_entities_not_shown`, `  note for More_${hidden}_entities_not_shown "Showing the ${ents.length} most-connected entities. The data dictionary lists all of them."`);
+  for (const e of ents) {
     L.push(`  class ${ident(e.name)} {`);
-    for (const f of e.fields || []) if (f.name) L.push(`    ${f.pk ? '+' : '-'}${ident(f.type || 'string')} ${ident(f.name)}`);
+    const fields = (e.fields || []).filter((f) => f.name);
+    const shown = compact ? fields.filter((f) => f.pk || f.fk) : fields;
+    for (const f of shown) L.push(`    ${f.pk ? '+' : '-'}${ident(f.type || 'string')} ${ident(f.name)}`);
+    if (compact && shown.length < fields.length) L.push(`    -more_${fields.length - shown.length}_attributes`);
     L.push('  }');
     const st = p.states.find((s) => s.entity === e.id);
     if (st) L.push(`  <<stateful>> ${ident(e.name)}`);
   }
   const MULT = { 'one-to-one': ['"1"', '"1"'], 'one-to-many': ['"1"', '"*"'], 'many-to-many': ['"*"', '"*"'], 'zero-or-one-to-many': ['"0..1"', '"*"'] };
   for (const r of p.relationships) {
-    const a = byId(p.entities, r.from), b = byId(p.entities, r.to);
+    const a = byId(ents, r.from), b = byId(ents, r.to);
     if (!a || !b) continue;
     const [m1, m2] = MULT[r.card] || MULT['one-to-many'];
     L.push(`  ${ident(a.name)} ${m1} --> ${m2} ${ident(b.name)} : ${word(r.label || 'has')}`);
@@ -232,6 +257,18 @@ export function roadmap(p) {
   return L.join('\n');
 }
 
+// ---------- Delivery schedule (from the cost & time estimate) ----------
+export function schedule(p) {
+  const e = estimate(p);
+  const L = ['gantt', `  title ${word(`${p.meta.name || 'Project'} delivery schedule`)}`, '  dateFormat YYYY-MM-DD', '  axisFormat %d %b', '  excludes weekends'];
+  const dated = e.phases.filter((ph) => ph.start && ph.end);
+  if (!dated.length) return `${L.join('\n')}\n  section Plan\n  Add work items and a start date :a1, 2027-01-04, 5d`;
+  L.push('  section Phases');
+  dated.forEach((ph, i) => L.push(`  ${word(ph.phase)} ${ph.days}d :${e.late && i === dated.length - 1 ? 'crit, ' : ''}ph${i}, ${ph.start}, ${daysBetween(ph.start, ph.end) + 1}d`));
+  if (e.deadline && /^\d{4}-\d{2}-\d{2}$/.test(e.deadline)) L.push('  section Milestones', `  Target date :milestone, m1, ${e.deadline}, 0d`);
+  return L.join('\n');
+}
+
 // ---------- Scope mind map ----------
 export function mindmap(p) {
   const t = (s) => word(s).slice(0, 60);
@@ -248,6 +285,8 @@ export function mindmap(p) {
 
 // ---------- Traceability graph ----------
 export function traceGraph(p) {
+  const total = p.objectives.length + p.requirements.length + p.stories.length + p.tests.length;
+  if (total > LIMITS.traceNodes) return traceSummary(p);
   const L = ['flowchart LR'];
   p.objectives.forEach((o) => L.push(`  ${id('O', o.id)}[${q(`${o.code} ${o.title}`)}]:::obj`));
   p.requirements.forEach((r) => L.push(`  ${id('R', r.id)}[${q(`${r.code} ${r.title}`)}]:::req`));
@@ -263,6 +302,30 @@ export function traceGraph(p) {
     (t.storyIds || []).forEach((s) => byId(p.stories, s) && L.push(`  ${id('U', s)} -.-> ${id('T', t.id)}`));
   }
   L.push('  classDef obj fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef req fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef story fill:#111111,stroke:#4ade80,color:#f2f2f2', '  classDef test fill:#111111,stroke:#8c8c8c,color:#f2f2f2', '  classDef pass fill:#22c55e,stroke:#15803d,color:#000000', '  classDef fail fill:#ef4444,stroke:#b91c1c,color:#000000');
+  return L.join('\n');
+}
+
+/** Condensed trace graph for big projects: objectives → requirements, with story and test counts in each box. */
+function traceSummary(p) {
+  const L = ['flowchart LR'];
+  const live = p.requirements.filter((r) => r.status !== 'Rejected');
+  const rank = { Must: 0, Should: 1, Could: 2, "Won't": 3 };
+  const reqs = [...live].sort((a, b) => (rank[a.priority] ?? 4) - (rank[b.priority] ?? 4)).slice(0, LIMITS.traceSummaryReqs);
+  const shown = new Set(reqs.map((r) => r.id));
+  L.push(`  NOTE[${q(`Large project: showing ${reqs.length} of ${live.length} requirements (Must first) with story and test counts. Use Traceability for the full matrix.`)}]:::note`);
+  p.objectives.forEach((o) => L.push(`  ${id('O', o.id)}[${q(`${o.code} ${o.title}`.slice(0, 70))}]:::obj`));
+  for (const r of reqs) {
+    const st = p.stories.filter((s) => (s.requirementIds || []).includes(r.id)).length;
+    const tests = p.tests.filter((t) => (t.requirementIds || []).includes(r.id));
+    const passed = tests.filter((t) => t.status === 'Passed').length;
+    const cls = !tests.length ? 'req' : tests.some((t) => t.status === 'Failed') ? 'fail' : passed === tests.length ? 'pass' : 'req';
+    L.push(`  ${id('R', r.id)}[${q(`${r.code} ${r.title}`.slice(0, 60) + ` · ${st} stories · ${passed}/${tests.length} tests`)}]:::${cls}`);
+  }
+  for (const r of reqs) {
+    (r.objectiveIds || []).forEach((o) => byId(p.objectives, o) && L.push(`  ${id('O', o)} --> ${id('R', r.id)}`));
+    (r.parentIds || []).forEach((x) => shown.has(x) && L.push(`  ${id('R', x)} --> ${id('R', r.id)}`));
+  }
+  L.push('  classDef note fill:#141414,stroke:#383838,color:#8c8c8c', '  classDef obj fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef req fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef pass fill:#22c55e,stroke:#15803d,color:#000000', '  classDef fail fill:#ef4444,stroke:#b91c1c,color:#000000');
   return L.join('\n');
 }
 
@@ -298,6 +361,7 @@ export const DIAGRAMS = [
   { id: 'priority', title: 'Value vs effort', group: 'Requirements', build: (p) => valueEffort(p), edit: '#/prioritise' },
   { id: 'mindmap', title: 'Scope mind map', group: 'Strategy', build: (p) => mindmap(p), edit: '#/charter' },
   { id: 'roadmap', title: 'Release roadmap', group: 'Planning', build: (p) => roadmap(p), edit: '#/c/releases' },
+  { id: 'schedule', title: 'Delivery schedule (estimate)', group: 'Planning', build: (p) => schedule(p), edit: '#/estimate' },
 ];
 
 /** Every generated diagram instance: one per item for "per" diagrams. */

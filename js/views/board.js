@@ -12,8 +12,8 @@ export function renderBoard(root) {
   const stories = p.stories.filter((s) => (!filter.release || s.release === filter.release) && (!filter.epic || s.epic === filter.epic));
   root.innerHTML = `
     <div class="page-head"><div><h1>Backlog board</h1><p>Drag stories between columns to update their status. Click a card to edit it.</p></div><span class="grow"></span>
-      <select data-rel style="width:auto"><option value="">All releases</option>${p.releases.map((r) => `<option value="${r.id}" ${filter.release === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select>
-      <select data-epic style="width:auto"><option value="">All epics</option>${epics.map((e) => `<option ${filter.epic === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>
+      <select data-rel style="width:auto;max-width:260px"><option value="">All releases</option>${p.releases.map((r) => `<option value="${r.id}" ${filter.release === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}</select>
+      <select data-epic style="width:auto;max-width:260px"><option value="">All epics</option>${epics.map((e) => `<option ${filter.epic === e ? 'selected' : ''}>${esc(e)}</option>`).join('')}</select>
       <button class="btn primary" data-add>+ Add story</button></div>
     <div class="board">${STORY_STATUS.map((st) => {
       const col = stories.filter((s) => s.status === st);

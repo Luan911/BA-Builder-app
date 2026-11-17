@@ -3,7 +3,9 @@
 import { esc, pill, autoPill } from './ui.js';
 
 export const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 10)}`;
-export const today = () => new Date().toISOString().slice(0, 10);
+/** Local calendar date as YYYY-MM-DD (toISOString would give the UTC date, a day off near midnight). */
+export const isoDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const today = () => isoDate();
 
 export function nextCode(list, prefix, pad = 3) {
   let max = 0;
@@ -50,6 +52,7 @@ const o = {
   entityNames: (p) => p.entities.map((x) => x.name),
   releases: (p) => p.releases.map((x) => ({ value: x.id, label: x.name })),
   epics: (p) => [...new Set(p.stories.map((s) => s.epic).filter(Boolean))],
+  rates: (p) => p.rates.map((x) => ({ value: x.id, label: `${x.role} (${x.dayRate || 0}/day)` })),
 };
 export const lookup = o;
 
@@ -70,7 +73,7 @@ export const rice = (s) => (+s.effort ? Math.round(((+s.reach || 0) * (+s.impact
 export const wsjf = (s) => (+s.jobSize ? Math.round((((+s.bv || 0) + (+s.tc || 0) + (+s.rr || 0)) / +s.jobSize) * 10) / 10 : 0);
 export const storyText = (p, s) => `As a ${nameOf(p.personas, s.asA) || 'user'}, I want ${s.iWant || '…'}${s.soThat ? `, so that ${s.soThat}` : ''}.`;
 
-const AMBIGUOUS = ['fast', 'quick', 'quickly', 'easy', 'easily', 'simple', 'user-friendly', 'user friendly', 'intuitive', 'seamless', 'flexible', 'robust', 'efficient', 'adequate', 'appropriate', 'as needed', 'if possible', 'etc', 'and/or', 'some', 'several', 'many', 'few', 'minimal', 'optimal', 'approximately', 'tbd', 'tbc', 'normally', 'usually', 'reasonable', 'sufficient', 'modern', 'better', 'improved', 'best'];
+const AMBIGUOUS = ['fast', 'quick', 'quickly', 'easy', 'easily', 'simple', 'user-friendly', 'user friendly', 'intuitive', 'seamless', 'flexible', 'robust', 'efficient', 'adequate', 'appropriate', 'as needed', 'if possible', 'etc', 'and/or', 'some', 'several', 'many', 'few', 'minimal', 'optimal', 'approximately', 'tbd', 'tbc', 'normally', 'usually', 'reasonable', 'sufficient', 'modern', 'better', 'improved', 'best', 'acceptable', 'rapid', 'rapidly', 'timely', 'promptly', 'as soon as possible', 'asap', 'state-of-the-art', 'and so on'];
 const AMB_RE = new RegExp(`\\b(${AMBIGUOUS.map((w) => w.replace(/[/-]/g, '\\$&')).join('|')})\\b`, 'gi');
 
 /** Requirement quality checks (IEEE 29148 style). Returns a list of problems. */
@@ -78,37 +81,70 @@ export function lintRequirement(r, p) {
   const out = [];
   const st = String(r.statement || '');
   const words = [...new Set((st.match(AMB_RE) || []).map((w) => w.toLowerCase()))];
-  if (words.length) out.push(`Ambiguous wording: ${words.join(', ')}`);
+  if (words.length) out.push(`Ambiguous wording: ${words.join(', ')} — replace with an exact number or behaviour`);
   if (st && !/\b(shall|must)\b/i.test(st) && ['Functional', 'Non-functional', 'Data', 'Interface'].includes(r.type)) out.push('Use "shall" or "must" for a binding statement');
-  if ((st.match(/\band\b/gi) || []).length >= 3) out.push('May contain several requirements — split it');
+  if ((st.match(/\band\b/gi) || []).length >= 3) out.push('May contain several requirements (3 or more "and") — split it into separate requirements');
   if (!st.trim()) out.push('No statement');
-  if (r.type === 'Non-functional' && !/\d/.test(`${st} ${r.metric || ''}`)) out.push('NFR has no measurable target');
-  if (['Functional', 'Non-functional'].includes(r.type) && !(r.acceptance || []).length) out.push('No acceptance criteria');
-  if (!r.source) out.push('No source stakeholder');
-  if (r.type !== 'Business' && !(r.objectiveIds || []).length && p.objectives.length) out.push('Not traced to an objective');
+  if (r.type === 'Non-functional' && !/\d/.test(`${st} ${r.metric || ''}`)) out.push('NFR has no measurable target — add a number to the statement or the metric');
+  if (['Functional', 'Non-functional'].includes(r.type) && !(r.acceptance || []).length) out.push('No acceptance criteria — add a Given / When / Then scenario');
+  if (!r.source) out.push('No source stakeholder — choose who asked for it');
+  if (r.type !== 'Business' && !(r.objectiveIds || []).length && p.objectives.length) out.push('Not traced to an objective — choose one under "Supports objectives"');
   return out;
 }
 
 /** Business case maths: NPV, ROI, payback year. */
 export function businessCase(p) {
   const rate = (+p.businessCase.discountRate || 0) / 100;
-  const years = Math.max(1, Math.min(10, +p.businessCase.years || 5));
+  const years = Math.max(1, Math.min(10, Math.round(+p.businessCase.years || 5)));
   const rows = [];
-  let cum = 0, npv = 0, totalCost = 0, totalBen = 0, payback = null;
+  let cum = 0, cumPv = 0, npv = 0, totalCost = 0, totalBen = 0, payback = null, paybackExact = null, discountedPayback = null;
   for (let y = 0; y <= years; y++) {
     const cost = p.financials.filter((f) => f.kind === 'Cost' && +f.year === y).reduce((a, f) => a + (+f.amount || 0), 0);
     const ben = p.financials.filter((f) => f.kind === 'Benefit' && +f.year === y).reduce((a, f) => a + (+f.amount || 0), 0);
     const net = ben - cost;
     const df = 1 / Math.pow(1 + rate, y);
+    const prev = cum, prevPv = cumPv;
     cum += net;
+    cumPv += net * df;
     npv += net * df;
     totalCost += cost;
     totalBen += ben;
-    if (payback === null && cum >= 0 && (totalBen > 0)) payback = y;
-    rows.push({ year: y, cost, ben, net, df, pv: net * df, cum });
+    if (payback === null && cum >= 0 && totalBen > 0) {
+      payback = y;
+      // linear interpolation inside the year the cumulative cash flow turns positive
+      paybackExact = prev < 0 && net > 0 ? y - 1 + -prev / net : y;
+    }
+    if (discountedPayback === null && cumPv >= 0 && totalBen > 0) discountedPayback = prevPv < 0 && net * df > 0 ? y - 1 + -prevPv / (net * df) : y;
+    rows.push({ year: y, cost, ben, net, df, pv: net * df, cum, cumPv });
   }
+  const outside = p.financials.filter((f) => !(+f.year >= 0 && +f.year <= years && Number.isInteger(+f.year)));
   const roi = totalCost ? ((totalBen - totalCost) / totalCost) * 100 : 0;
-  return { rows, npv, roi, totalCost, totalBen, payback, rate, years };
+  return { rows, npv, roi, totalCost, totalBen, payback, paybackExact, discountedPayback, irr: irr(rows.map((r) => r.net)), rate, years, outside };
+}
+
+/** Internal rate of return: the discount rate where NPV = 0. null when it does not exist. */
+export function irr(flows) {
+  const npvAt = (r) => flows.reduce((a, f, t) => a + f / Math.pow(1 + r, t), 0);
+  if (!flows.some((f) => f < 0) || !flows.some((f) => f > 0)) return null;
+  let lo = -0.99, hi = 10;
+  let fLo = npvAt(lo);
+  if (fLo * npvAt(hi) > 0) return null;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2, fm = npvAt(mid);
+    if (Math.abs(fm) < 1e-9) return mid;
+    if (fLo * fm < 0) hi = mid;
+    else (lo = mid, fLo = fm);
+  }
+  return (lo + hi) / 2;
+}
+
+/** PERT expected days for one work item (same formula as js/estimate.js). */
+export function pertDays(x) {
+  let a = +x.optimistic || 0, m = +x.likely || 0, c = +x.pessimistic || 0;
+  if (!m) m = a || c;
+  if (!a) a = m;
+  if (!c) c = m;
+  return (Math.min(a, m, c) + 4 * m + Math.max(a, m, c)) / 6;
 }
 
 // ---------- collection schemas ----------
@@ -344,7 +380,36 @@ export const COLLECTIONS = {
   releases: {
     title: 'Releases & sprints', singular: 'release',
     fields: [{ key: 'name', label: 'Name', req: true }, { key: 'goal', label: 'Goal', full: true }, { key: 'start', label: 'Start', type: 'date', req: true }, { key: 'end', label: 'End', type: 'date', req: true }],
+    validate: (x) => (x.start && x.end && x.end < x.start ? 'The end date must be on or after the start date' : ''),
     cols: [['Release', (x) => `${b(x.name)}<div class="muted small">${cut(x.goal, 80)}</div>`], ['Start', (x) => esc(x.start)], ['End', (x) => esc(x.end)], ['Stories', (x, p) => String(p.stories.filter((s) => s.release === x.id).length)]],
+  },
+  rates: {
+    title: 'Team & day rates', singular: 'role',
+    intro: 'Roles on the delivery team, what each costs per day, and how many people fill it.',
+    fields: [{ key: 'role', label: 'Role', req: true, ph: 'e.g. Developer' }, { key: 'dayRate', label: 'Day rate', type: 'number', req: true, min: 0 }, { key: 'fte', label: 'People in this role (FTE)', type: 'number', min: 0.1, step: 0.1 }, { key: 'notes', label: 'Notes' }],
+    cols: [['Role', (x) => b(x.role)], ['Day rate', (x) => Number(x.dayRate || 0).toLocaleString(), 'num'], ['People', (x) => esc(x.fte || 1), 'num']],
+    defaults: () => ({ fte: 1 }),
+    validate: (x) => (+x.dayRate < 0 ? 'The day rate cannot be negative' : x.fte !== '' && x.fte != null && !(+x.fte > 0) ? 'People must be more than 0' : ''),
+  },
+  workItems: {
+    title: 'Work estimate', singular: 'work item', prefix: 'WI',
+    intro: 'Three-point estimates in person-days. Expected effort uses PERT: (optimistic + 4 x likely + pessimistic) / 6.',
+    fields: [
+      { key: 'code', label: 'ID' }, { key: 'item', label: 'Work item', req: true, ph: 'e.g. Build online application form' },
+      { key: 'phase', label: 'Phase', type: 'select', options: ['Analysis', 'Design', 'Build', 'Test', 'Deploy', 'Project management', 'Other'], blank: false }, { key: 'role', label: 'Done by (role)', type: 'select', options: o.rates },
+      { key: 'optimistic', label: 'Optimistic (days)', type: 'number', min: 0, step: 0.5 }, { key: 'likely', label: 'Most likely (days)', type: 'number', min: 0, step: 0.5, req: true },
+      { key: 'pessimistic', label: 'Pessimistic (days)', type: 'number', min: 0, step: 0.5 }, { key: 'requirementIds', label: 'Covers requirements', type: 'multi', options: o.requirements },
+      { key: 'notes', label: 'Assumptions', type: 'textarea', rows: 2 },
+    ],
+    cols: [['ID', (x) => b(x.code)], ['Work item', (x) => b(x.item)], ['Phase', (x) => pill(x.phase || 'Other')], ['Role', (x, p) => esc(byId(p.rates, x.role)?.role || '—')], ['O / M / P', (x) => esc(`${x.optimistic || '–'} / ${x.likely || '–'} / ${x.pessimistic || '–'}`), 'num'], ['Expected', (x) => `${pertDays(x).toFixed(1)} d`, 'num']],
+    defaults: () => ({ phase: 'Build', requirementIds: [] }),
+    validate: (x) => {
+      const n = [x.optimistic, x.likely, x.pessimistic].filter((v) => v !== '' && v != null).map(Number);
+      if (n.some((v) => v < 0 || Number.isNaN(v))) return 'Estimates must be 0 or more';
+      if (+x.optimistic && +x.likely && +x.optimistic > +x.likely) return 'Optimistic must not be more than most likely';
+      if (+x.pessimistic && +x.likely && +x.pessimistic < +x.likely) return 'Pessimistic must not be less than most likely';
+      return '';
+    },
   },
   glossary: {
     title: 'Glossary', singular: 'term',
@@ -363,6 +428,7 @@ export function blankProject(name = '') {
     meta: { name, code: '', client: '', sponsor: '', analyst: '', version: '0.1', methodology: 'Agile', domain: '', summary: '' },
     charter: { problem: '', vision: '', scopeIn: [], scopeOut: [], successCriteria: [], budget: '', deadline: '', constraints: [] },
     businessCase: { discountRate: 10, years: 5, options: '', recommendation: '', currency: 'R' },
+    estimate: { startDate: '', contingency: 15, hoursPerDay: 8, workDays: [1, 2, 3, 4, 5], holidays: '', velocity: 0, sprintWeeks: 2 },
     raci: {}, // { deliverable: { stakeholderId: 'R' | 'A' | 'C' | 'I' } }
     raciItems: ['Business case', 'Requirements baseline', 'Solution design', 'UAT', 'Go-live'],
     diagrams: [], // Diagram Studio: { id, name, code }
@@ -376,10 +442,15 @@ export function blankProject(name = '') {
 export function normalize(input) {
   const base = blankProject();
   const p = { ...base, ...(input && typeof input === 'object' ? input : {}) };
-  for (const k of ['meta', 'charter', 'businessCase']) p[k] = { ...base[k], ...(p[k] || {}) };
+  for (const k of ['meta', 'charter', 'businessCase', 'estimate']) p[k] = { ...base[k], ...(p[k] || {}) };
   for (const k of [...COLLECTION_KEYS, 'diagrams', 'canvases', 'raciItems']) if (!Array.isArray(p[k])) p[k] = base[k];
   if (!p.raci || typeof p.raci !== 'object') p.raci = {};
-  for (const k of COLLECTION_KEYS) for (const it of p[k]) it.id ||= uid(k.slice(0, 3));
+  for (const k of COLLECTION_KEYS) {
+    p[k] = p[k].filter((it) => it && typeof it === 'object');
+    for (const it of p[k]) it.id ||= uid(k.slice(0, 3));
+    // imported or hand-edited files may lack IDs; documents and diagrams rely on them
+    for (const it of p[k]) ensureCode(k, it, p[k]);
+  }
   return p;
 }
 

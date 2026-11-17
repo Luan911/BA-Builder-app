@@ -12,19 +12,48 @@ const isType = (t) => (r) => r.type === t;
 const reqsOf = (p, t) => p.requirements.filter((r) => r.type === t && r.status !== 'Rejected');
 const clean = (p, list) => list.every((r) => !lintRequirement(r, p).length);
 
-// Non-functional templates: realistic, measurable starting points the analyst edits.
-const NFR_TEMPLATES = [
-  ['Performance', 'Response time', 'The system shall respond to 95% of user requests within 2 seconds while 500 users are active.', 'p95 response time < 2 s at 500 concurrent users'],
-  ['Availability', 'Uptime', 'The system shall be available 99.9% of each calendar month, excluding planned maintenance announced 48 hours in advance.', 'Monthly uptime ≥ 99.9%'],
-  ['Security', 'Strong sign-in', 'The system shall require multi-factor authentication for all staff accounts and lock an account after 5 failed sign-in attempts.', 'MFA on 100% of staff accounts; lock after 5 failures'],
-  ['Privacy', 'Encrypt personal data', 'The system shall encrypt personal data at rest with AES-256 and in transit with TLS 1.2 or higher.', '100% of personal data encrypted'],
-  ['Usability', 'Learnability', 'A first-time user shall complete the main task without help in under 5 minutes in at least 90% of usability test sessions.', '≥ 90% complete in < 5 min'],
-  ['Accessibility', 'WCAG compliance', 'All user-facing screens shall conform to WCAG 2.2 level AA.', '0 level AA failures in the accessibility audit'],
-  ['Scalability', 'Growth', 'The system shall support 10 000 daily active users without changes to the architecture, with response times still meeting the performance requirement.', '10 000 DAU within p95 < 2 s'],
-  ['Reliability', 'Recovery', 'The system shall be restored within 4 hours of a failure (RTO) with no more than 15 minutes of data loss (RPO).', 'RTO ≤ 4 h, RPO ≤ 15 min'],
-  ['Auditability', 'Audit trail', 'The system shall record the user, time and old and new values for every create, update and delete of business data, and keep the record for 7 years.', '100% of changes logged; 7-year retention'],
-  ['Compliance', 'Data protection law', 'The system shall allow an authorised administrator to export or delete all personal data held about a person within 30 days of a verified request.', 'Requests completed within 30 days'],
-];
+/** What is still missing for a step, as [message, requirementId?] pairs. Empty = nothing to do. */
+function todo(step, p) {
+  const out = [];
+  const reqTodo = (type, label) => {
+    const list = reqsOf(p, type);
+    if (!list.length) out.push([`Add at least one ${label}.`]);
+    for (const r of list) for (const issue of lintRequirement(r, p)) out.push([`${r.code || r.title}: ${issue}`, r.id]);
+  };
+  switch (step.id) {
+    case 'intro':
+      if (!p.meta.name) out.push(['Enter the system name.']);
+      if (!p.meta.summary) out.push(['Write the purpose and summary.']);
+      break;
+    case 'scope':
+      if (!p.charter.problem) out.push(['Write the problem statement.']);
+      if (!p.charter.scopeIn.length) out.push(['List at least one item that is in scope.']);
+      if (!p.charter.scopeOut.length) out.push(['List at least one item that is out of scope.']);
+      break;
+    case 'objectives':
+      if (!p.objectives.length) out.push(['Add at least one business objective.']);
+      for (const o of p.objectives) if (!/\d/.test(o.target || '')) out.push([`${o.code || o.title}: the target needs a number`]);
+      break;
+    case 'people':
+      if (!p.personas.length) out.push(['Add at least one user type.']);
+      if (!p.stakeholders.some((x) => x.approver)) out.push(['Tick “Approves deliverables” on at least one stakeholder.']);
+      break;
+    case 'functional': reqTodo('Functional', 'functional requirement'); break;
+    case 'nfr': reqTodo('Non-functional', 'quality requirement (NFR)'); break;
+    default:
+  }
+  return out;
+}
+
+/** The to-do box shown at the top of a step; requirement lines open that requirement. */
+function todoHtml(step, p) {
+  if (step.id === 'review' || step.done(p)) return '';
+  const list = todo(step, p);
+  if (!list.length) return '';
+  return `<div class="callout warn" style="margin-bottom:16px"><b>To finish this step (${list.length}):</b><ul class="lint">${list.slice(0, 12).map(([msg, id]) => `<li>${id ? `<a href="#" data-open="${esc(id)}">${esc(msg)}</a>` : esc(msg)}</li>`).join('')}${list.length > 12 ? `<li>…and ${list.length - 12} more</li>` : ''}</ul>${list.some(([, id]) => id) ? '<div class="small muted">Click a line to open that requirement.</div>' : ''}</div>`;
+}
+
+import { NFR_TEMPLATES } from '../templates.js';
 
 /** The steps. `done(p)` says whether the step is complete; `optional` steps never block. */
 export const STEPS = [
@@ -87,7 +116,8 @@ export const STEPS = [
       el.innerHTML = `<section class="card" style="margin-bottom:16px"><h2 style="margin-bottom:8px">Add from a template</h2><div class="chips-add">${NFR_TEMPLATES.map(([cat, name], i) => `<button class="btn sm ${have.has(cat) ? '' : 'red'}" data-tpl="${i}" title="${esc(NFR_TEMPLATES[i][2])}">${have.has(cat) ? '✓ ' : '+ '}${esc(cat)} · ${esc(name)}</button>`).join('')}</div><p class="muted small" style="margin-top:8px">Red = category not covered yet. Green tick = already covered.</p></section><div data-list></div>`;
       $$('[data-tpl]', el).forEach((b) => (b.onclick = () => {
         const [category, title, statement, metric] = NFR_TEMPLATES[+b.dataset.tpl];
-        openItem('requirements', null, { type: 'Non-functional', category, title, statement, metric, priority: 'Must', acceptance: [{ given: 'the system is under normal production conditions', when: `the ${category.toLowerCase()} test is run`, then: `the result meets: ${metric}` }] });
+        const pr = project();
+        openItem('requirements', null, { type: 'Non-functional', category, title, statement, metric, priority: 'Must', objectiveIds: pr.objectives.length === 1 ? [pr.objectives[0].id] : [], source: pr.stakeholders.filter((x) => x.approver).length === 1 ? pr.stakeholders.find((x) => x.approver).id : '', acceptance: [{ given: 'the system is under normal production conditions', when: `the ${category.toLowerCase()} test is run`, then: `the result meets: ${metric}` }] });
       }));
       renderCollection($('[data-list]', el), 'requirements', { heading: false, title: 'Quality requirements', addLabel: 'Add your own NFR', where: isType('Non-functional'), preset: { type: 'Non-functional', priority: 'Must' }, noFilters: true, stateKey: 'wiz-nfr' });
     },
@@ -146,7 +176,7 @@ function reviewStep(el, p) {
   const fr = reqsOf(p, 'Functional'), nfr = reqsOf(p, 'Non-functional');
   const issues = p.requirements.map((r) => [r, lintRequirement(r, p)]).filter(([, l]) => l.length);
   const checks = [
-    ...STEPS.slice(0, -1).map((s, i) => [s.done(p), `Step ${i + 1}: ${s.title}${s.optional ? ' (optional)' : ''}`, i + 1, s.optional]),
+    ...STEPS.slice(0, -1).map((s, i) => [s.done(p), `Step ${i + 1}: ${s.title}${s.optional ? ' (optional)' : ''}`, i + 1, s.optional, todo(s, p).map(([m]) => m)]),
     [fr.every((r) => (r.acceptance || []).length), 'Every functional requirement has acceptance criteria', 5],
     [['Performance', 'Security'].every((c) => nfr.some((r) => r.category === c)), 'Performance and Security NFRs present', 6],
     [!issues.length, `No requirement quality warnings (${issues.length} to fix)`, 5],
@@ -156,7 +186,7 @@ function reviewStep(el, p) {
   el.innerHTML = `
     <div class="grid g2">
       <section class="card"><h2 style="margin-bottom:8px">Completeness checklist</h2>
-        <ul class="checklist">${checks.map(([ok, label, step, opt]) => `<li><span class="${ok ? 'ok' : 'no'}">${ok ? '✔' : opt ? '○' : '✖'}</span><span class="grow">${esc(label)}</span>${ok ? '' : `<a href="#/srs/${step}">Fix →</a>`}</li>`).join('')}</ul>
+        <ul class="checklist">${checks.map(([ok, label, step, opt, why]) => `<li><span class="${ok ? 'ok' : 'no'}">${ok ? '✔' : opt ? '○' : '✖'}</span><span class="grow">${esc(label)}${!ok && why && why.length ? `<span class="small" style="display:block;color:var(--red-2)">${why.slice(0, 3).map(esc).join('<br>')}${why.length > 3 ? `<br>…and ${why.length - 3} more` : ''}</span>` : ''}</span>${ok ? '' : `<a href="#/srs/${step}">${opt ? 'Add' : 'Fix'} →</a>`}</li>`).join('')}</ul>
       </section>
       <section class="card"><h2 style="margin-bottom:8px">Download your SRS</h2>
         <p class="muted small">${fr.length} functional and ${nfr.length} quality requirements, ${p.usecases.length} use cases, ${p.entities.length} data entities.</p>
@@ -165,7 +195,7 @@ function reviewStep(el, p) {
           <button class="btn lg" data-pdf>PDF / print</button>
           <button class="btn lg" data-md>Markdown</button>
         </div>
-        ${issues.length ? `<div class="callout warn"><b>${issues.length} requirement(s) still have warnings:</b><ul class="lint">${issues.slice(0, 6).map(([r, l]) => `<li>${esc(r.code)}: ${esc(l.join(' · '))}</li>`).join('')}</ul></div>` : '<div class="callout">✓ All requirements pass the quality checks.</div>'}
+        ${issues.length ? `<div class="callout warn"><b>${issues.length} requirement(s) still have warnings:</b><ul class="lint">${issues.slice(0, 8).map(([r, l]) => `<li><a href="#" data-open="${esc(r.id)}">${esc(r.code)}</a>: ${esc(l.join(' · '))}</li>`).join('')}${issues.length > 8 ? `<li>…and ${issues.length - 8} more</li>` : ''}</ul></div>` : '<div class="callout">✓ All requirements pass the quality checks.</div>'}
         <p class="small" style="margin-top:12px"><a href="#/docs/usecases">Use case specification</a> · <a href="#/docs/rtm">Traceability matrix</a> · <a href="#/docs/data">Data dictionary</a> · <a href="#/settings">OpenAPI / SQL exports</a></p>
       </section>
     </div>
@@ -230,6 +260,7 @@ export function renderWizard(root, stepNo) {
       <div>
         <header class="wiz-head"><div class="step-no">Step ${i + 1} of ${STEPS.length}${step.optional ? ' · optional' : ''}</div><h1>${esc(step.title)}</h1><p>${esc(step.lead)}</p></header>
         <div class="why">${step.tips.map(([h, t]) => `<div><b>${esc(h)}</b>${esc(t)}</div>`).join('')}</div>
+        <div data-todo></div>
         <div data-body></div>
         <footer class="wiz-foot">
           ${i > 0 ? `<a class="btn" href="#/srs/${i}">← Back</a>` : '<span></span>'}
@@ -246,8 +277,14 @@ export function renderWizard(root, stepNo) {
     $('[data-steps]', root).innerHTML = STEPS.map((s, k) => `<li class="${s.done(pr) ? 'done' : ''}"><a href="#/srs/${k + 1}" class="${k === i ? 'on' : ''}" ${k === i ? 'aria-current="step"' : ''}><span class="num">${s.done(pr) ? '✓' : k + 1}</span><span class="lbl">${esc(s.title)}<br><span class="small muted">${esc(s.short)}</span></span></a></li>`).join('');
     const ok = step.done(pr);
     const st = $('[data-state]', root);
+    const td = $('[data-todo]', root);
+    td.innerHTML = todoHtml(step, pr);
     if (step.id !== 'review') st.innerHTML = ok ? '<span style="color:var(--ok)">✔ This step is complete</span>' : step.optional ? 'Optional — add what applies, or skip' : '<span style="color:var(--red-2)">● Not finished yet — you can still continue and come back</span>';
   };
   refreshNav();
   step.render($('[data-body]', root), p);
+  $('.wiz', root).addEventListener('click', (e) => {
+    const a = e.target.closest('[data-open]');
+    if (a) (e.preventDefault(), openItem('requirements', a.dataset.open));
+  });
 }

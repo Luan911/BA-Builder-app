@@ -189,6 +189,23 @@ export function sampleProject() {
       { id: 'rel1', name: 'Release 1 — Apply & decide', goal: 'Online application with automated decision', start: '2027-01-11', end: '2027-04-30' },
       { id: 'rel2', name: 'Release 2 — Back office & documents', goal: 'Referral queue and document upload', start: '2027-05-03', end: '2027-08-27' },
     ],
+    estimate: { startDate: '2027-01-11', contingency: 15, hoursPerDay: 8, workDays: [1, 2, 3, 4, 5], holidays: '2027-03-22, 2027-03-26, 2027-03-29, 2027-04-27, 2027-05-03, 2027-06-16', velocity: 30, sprintWeeks: 2 },
+    rates: [
+      { id: 'ra1', role: 'Business analyst', dayRate: 7500, fte: 1 },
+      { id: 'ra2', role: 'Solution architect', dayRate: 11000, fte: 0.5 },
+      { id: 'ra3', role: 'Developer', dayRate: 8500, fte: 4 },
+      { id: 'ra4', role: 'Tester', dayRate: 6000, fte: 2 },
+      { id: 'ra5', role: 'Project manager', dayRate: 9000, fte: 0.5 },
+    ],
+    workItems: [
+      { code: 'WI-001', item: 'Requirements and process workshops', phase: 'Analysis', role: 'ra1', optimistic: 15, likely: 20, pessimistic: 30, requirementIds: [] },
+      { code: 'WI-002', item: 'Solution architecture and integration design', phase: 'Design', role: 'ra2', optimistic: 8, likely: 12, pessimistic: 20, requirementIds: [] },
+      { code: 'WI-003', item: 'Online application form and calculator', phase: 'Build', role: 'ra3', optimistic: 25, likely: 35, pessimistic: 55, requirementIds: ['r3'] },
+      { code: 'WI-004', item: 'Credit bureau and rules engine integration', phase: 'Build', role: 'ra3', optimistic: 30, likely: 45, pessimistic: 80, requirementIds: ['r4'] },
+      { code: 'WI-005', item: 'Referral queue for credit officers', phase: 'Build', role: 'ra3', optimistic: 20, likely: 28, pessimistic: 45, requirementIds: [] },
+      { code: 'WI-006', item: 'System, integration and performance testing', phase: 'Test', role: 'ra4', optimistic: 30, likely: 40, pessimistic: 60, requirementIds: [] },
+      { code: 'WI-007', item: 'Release, data migration and hypercare', phase: 'Deploy', role: 'ra3', optimistic: 8, likely: 12, pessimistic: 20, requirementIds: [] },
+    ],
     glossary: [
       { term: 'Affordability', definition: 'Assessment of whether the applicant can repay the loan after essential expenses, as required by the National Credit Act.' },
       { term: 'Referral', definition: 'An application that the rules engine neither approves nor declines; a credit officer decides it.' },

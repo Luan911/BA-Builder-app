@@ -2,6 +2,7 @@
 import { byId, nameOf, storyText, riskScore, riskLevel, businessCase, lintRequirement, today, rice, wsjf } from '../model.js';
 import * as D from './diagrams.js';
 import { rtmRows, sqlDdl } from './exports.js';
+import { estimate } from '../estimate.js';
 
 const cell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim() || '—';
 export const table = (head, rows) => (rows.length ? [`| ${head.map(cell).join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...rows.map((r) => `| ${r.map(cell).join(' | ')} |`)].join('\n') : '_None recorded._');
@@ -50,7 +51,7 @@ const DOCS = {
       header(p, 'Business Case', 'Justifies the investment by comparing options, costs, benefits and risks.'),
       `## 2. Problem / opportunity\n${or(p.charter.problem)}`,
       `## 3. Options considered\n${or(p.businessCase.options).split('\n').map((l) => (l.trim() ? `- ${l.replace(/^[-*]\s*/, '')}` : '')).join('\n')}`,
-      `## 4. Financial summary\n${table(['Measure', 'Value'], [['Total cost', money(p, bc.totalCost)], ['Total benefit', money(p, bc.totalBen)], [`Net present value @ ${(bc.rate * 100).toFixed(1)}%`, money(p, bc.npv)], ['Return on investment', `${bc.roi.toFixed(1)}%`], ['Payback', bc.payback === null ? 'Not within horizon' : `Year ${bc.payback}`]])}`,
+      `## 4. Financial summary\n${table(['Measure', 'Value'], [['Total cost', money(p, bc.totalCost)], ['Total benefit', money(p, bc.totalBen)], [`Net present value @ ${(bc.rate * 100).toFixed(1)}%`, money(p, bc.npv)], ['Return on investment', `${bc.roi.toFixed(1)}%`], ['Internal rate of return', bc.irr === null ? 'n/a' : `${(bc.irr * 100).toFixed(1)}%`], ['Payback', bc.paybackExact === null ? 'Not within horizon' : `${bc.paybackExact.toFixed(1)} years`], ['Discounted payback', bc.discountedPayback === null ? 'Not within horizon' : `${bc.discountedPayback.toFixed(1)} years`]])}`,
       `## 5. Cash flow\n${table(['Year', 'Costs', 'Benefits', 'Net', 'Discount factor', 'Present value', 'Cumulative'], bc.rows.map((r) => [r.year, money(p, r.cost), money(p, r.ben), money(p, r.net), r.df.toFixed(3), money(p, r.pv), money(p, r.cum)]))}`,
       `## 6. Cost and benefit items\n${table(['Type', 'Year', 'Item', 'Category', 'Amount', 'Assumptions'], p.financials.map((f) => [f.kind, f.year, f.item, f.category, money(p, +f.amount || 0), f.notes]))}`,
       `## 7. Alignment to objectives\n${table(['ID', 'Objective', 'Target'], p.objectives.map((o) => [o.code, o.title, o.target]))}`,
@@ -208,6 +209,23 @@ const DOCS = {
     `## Transition requirements\n${reqTable(p, reqsOf(p, ['Transition']))}`,
     `## Readiness checklist\n${list(['UAT signed off', 'Training delivered to affected staff', 'Data migration rehearsed', 'Support and runbooks handed over', 'Rollback plan agreed', 'Communications sent to customers and staff'])}`,
   ] },
+
+  estimate: { title: 'Cost & Schedule Estimate', audience: 'Sponsor, delivery lead, finance', build: (p) => {
+    const e = estimate(p);
+    const d1 = (n) => (Math.round(n * 10) / 10).toString();
+    return [
+      header(p, 'Cost & Schedule Estimate', 'Expected effort, cost and finish date, with a confidence range, built from three-point estimates.'),
+      `## 2. Summary\n${table(['Measure', 'Value'], [['Expected effort', `${d1(e.effort)} person-days (${Math.round(e.hours)} hours)`], ['Labour cost', money(p, e.labour)], [`Contingency (${Math.round(e.contingency * 100)}%)`, money(p, e.total - e.labour)], ['Total estimated cost', money(p, e.total)], ['Duration', `${e.durationDays} working days`], ['Start', e.startDate || 'Not set'], ['Estimated finish', e.endDate || 'Not set'], ['Target date', e.deadline || 'Not set']])}`,
+      e.warnings.length ? `> **Check:** ${e.warnings.join('; ')}` : '',
+      `## 3. Confidence range\nAssumes the work items are independent; uses the PERT standard deviation of each item.\n\n${table(['Confidence', 'Effort (days)', 'Cost'], [['50%', '50'], ['80%', '80'], ['90%', '90'], ['95%', '95']].map(([l, k]) => [l, d1(e.confidence[k].effort), money(p, e.confidence[k].cost)]))}`,
+      `## 4. Schedule\n${mmd(D.schedule(p))}\n\n${table(['Phase', 'Effort (days)', 'Working days', 'Start', 'End', 'Labour cost'], e.phases.map((ph) => [ph.phase, d1(ph.effort), ph.days, ph.start, ph.end, money(p, ph.cost)]))}`,
+      `## 5. Team and rates\n${table(['Role', 'Day rate', 'People'], p.rates.map((r) => [r.role, money(p, +r.dayRate || 0), r.fte || 1]))}`,
+      `## 6. Work items\n${table(['ID', 'Work item', 'Phase', 'Role', 'Optimistic', 'Likely', 'Pessimistic', 'Expected', 'Cost'], e.items.map((w) => [w.code, w.item, w.phase, byId(p.rates, w.role)?.role || '', w.optimistic, w.likely, w.pessimistic, d1(w.expected), money(p, w.cost)]))}`,
+      e.velocity ? `## 7. Agile forecast\n${e.openPoints} open story points at ${e.velocity} points per ${e.sprintWeeks}-week sprint = **${e.sprints} sprints**${e.agileEnd ? `, finishing about ${e.agileEnd}` : ''}.` : '',
+      `## Method\n- Expected effort per item = (optimistic + 4 x most likely + pessimistic) / 6; standard deviation = (pessimistic - optimistic) / 6.\n- Phases run one after another; within a phase, roles work in parallel, so a phase lasts as long as its busiest role (effort / people).\n- Dates count working days only (${e.settings.workDays.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ')}), skipping ${e.settings.holidays.length} listed holiday(s).`,
+      signoff(p),
+    ];
+  } },
 
   glossary: { title: 'Glossary', audience: 'Everyone', build: (p) => [
     header(p, 'Glossary', 'Shared definitions of business terms, so everyone uses the same language.'),
