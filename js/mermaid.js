@@ -2,30 +2,40 @@
 const URL_MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
 let ready = null;
 let seq = 0;
+let current = '';
 
-function lib() {
-  ready ||= import(URL_MERMAID).then((m) => {
-    const mm = m.default;
-    mm.initialize({
-      startOnLoad: false,
-      securityLevel: 'strict',
-      theme: 'base',
-      fontFamily: 'Segoe UI, Arial, sans-serif',
-      themeVariables: { primaryColor: '#e6f6f4', primaryBorderColor: '#0f766e', primaryTextColor: '#0e1a22', lineColor: '#5b6b75', secondaryColor: '#f0f3f5', tertiaryColor: '#ffffff', clusterBkg: '#f8fafb', clusterBorder: '#c9d1d8', fontSize: '14px', quadrant1Fill: '#e6f6f4', quadrant2Fill: '#eef6ff', quadrant3Fill: '#f5f7f8', quadrant4Fill: '#fff8eb' },
-      flowchart: { curve: 'basis', padding: 12, htmlLabels: false },
-      sequence: { mirrorActors: false },
-    });
-    return mm;
-  }).catch((e) => {
+// Screen theme: black canvas, green shapes, red connectors. Light theme: used for Word / HTML exports.
+const THEMES = {
+  dark: { darkMode: true, background: '#000000', primaryColor: '#0d2416', primaryBorderColor: '#22c55e', primaryTextColor: '#f2f2f2', secondaryColor: '#2a0e0e', secondaryBorderColor: '#ef4444', secondaryTextColor: '#f2f2f2', tertiaryColor: '#111111', tertiaryBorderColor: '#3a3a3a', tertiaryTextColor: '#f2f2f2', lineColor: '#ef4444', textColor: '#f2f2f2', mainBkg: '#0d2416', nodeBorder: '#22c55e', clusterBkg: '#080808', clusterBorder: '#3a3a3a', titleColor: '#4ade80', edgeLabelBackground: '#000000', noteBkgColor: '#2a0e0e', noteBorderColor: '#ef4444', noteTextColor: '#f2f2f2', actorBkg: '#0d2416', actorBorder: '#22c55e', actorTextColor: '#f2f2f2', actorLineColor: '#555555', signalColor: '#f2f2f2', signalTextColor: '#f2f2f2', labelBoxBkgColor: '#0d2416', labelBoxBorderColor: '#22c55e', labelTextColor: '#f2f2f2', loopTextColor: '#f2f2f2', sequenceNumberColor: '#000000', attributeBackgroundColorOdd: '#0a0a0a', attributeBackgroundColorEven: '#141414', quadrant1Fill: '#0d2416', quadrant2Fill: '#112b19', quadrant3Fill: '#1a0b0b', quadrant4Fill: '#2a0e0e', quadrant1TextFill: '#f2f2f2', quadrant2TextFill: '#f2f2f2', quadrant3TextFill: '#f2f2f2', quadrant4TextFill: '#f2f2f2', quadrantPointFill: '#ef4444', quadrantPointTextFill: '#f2f2f2', quadrantXAxisTextFill: '#cfcfcf', quadrantYAxisTextFill: '#cfcfcf', quadrantTitleFill: '#4ade80', quadrantInternalBorderStrokeFill: '#3a3a3a', quadrantExternalBorderStrokeFill: '#3a3a3a', pie1: '#22c55e', pie2: '#ef4444', pie3: '#15803d', pie4: '#b91c1c', pie5: '#4ade80', pie6: '#f87171', pieTitleTextColor: '#f2f2f2', pieSectionTextColor: '#000000', pieLegendTextColor: '#f2f2f2', pieStrokeColor: '#000000', gridColor: '#262626', sectionBkgColor: '#0d2416', altSectionBkgColor: '#111111', taskBkgColor: '#22c55e', taskBorderColor: '#15803d', taskTextColor: '#000000', taskTextOutsideColor: '#f2f2f2', activeTaskBkgColor: '#ef4444', doneTaskBkgColor: '#15803d', critBkgColor: '#ef4444', todayLineColor: '#ef4444', cScale0: '#15803d', cScale1: '#b91c1c', cScale2: '#166534', cScale3: '#991b1b', fillType0: '#0d2416', fillType1: '#2a0e0e', fontSize: '14px' },
+  light: { primaryColor: '#e9f9ef', primaryBorderColor: '#16a34a', primaryTextColor: '#111111', secondaryColor: '#fdecec', tertiaryColor: '#ffffff', lineColor: '#dc2626', textColor: '#111111', clusterBkg: '#fafafa', clusterBorder: '#cccccc', edgeLabelBackground: '#ffffff', noteBkgColor: '#fdecec', noteBorderColor: '#dc2626', quadrant1Fill: '#e9f9ef', quadrant2Fill: '#f2fbf5', quadrant3Fill: '#fafafa', quadrant4Fill: '#fdecec', quadrantPointFill: '#dc2626', pie1: '#16a34a', pie2: '#dc2626', pie3: '#15803d', pie4: '#b91c1c', taskBkgColor: '#16a34a', critBkgColor: '#dc2626', fontSize: '14px' },
+};
+
+function lib(mode) {
+  ready ||= import(URL_MERMAID).catch((e) => {
     ready = null;
     throw new Error(`Could not load the diagram library — check your internet connection. (${e.message})`);
   });
-  return ready;
+  return ready.then((m) => {
+    const mm = m.default;
+    if (current !== mode) {
+      mm.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: 'base',
+        fontFamily: 'Segoe UI, Arial, sans-serif',
+        themeVariables: THEMES[mode],
+        flowchart: { curve: 'basis', padding: 12, htmlLabels: false },
+        sequence: { mirrorActors: false },
+      });
+      current = mode;
+    }
+    return mm;
+  });
 }
 
-/** Render Mermaid source to an SVG string. Throws with a readable message on syntax errors. */
-export async function render(code) {
-  const mm = await lib();
+/** Render Mermaid source to an SVG string. `light: true` for documents exported to white pages. */
+export async function render(code, { light = false } = {}) {
+  const mm = await lib(light ? 'light' : 'dark');
   const elId = `mmd${Date.now().toString(36)}${seq++}`;
   try {
     const { svg } = await mm.render(elId, code);
@@ -38,7 +48,7 @@ export async function render(code) {
 }
 
 export async function validate(code) {
-  const mm = await lib();
+  const mm = await lib('dark');
   try {
     await mm.parse(code);
     return null;
@@ -61,7 +71,7 @@ export function sized(svg) {
   return { svg: new XMLSerializer().serializeToString(el), w, h };
 }
 
-export function svgToPng(svg, scale = 2) {
+export function svgToPng(svg, scale = 2, bg = '#000000') {
   const { svg: s, w, h } = sized(svg);
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -70,7 +80,7 @@ export function svgToPng(svg, scale = 2) {
       c.width = Math.ceil(w * scale);
       c.height = Math.ceil(h * scale);
       const ctx = c.getContext('2d');
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = bg;
       ctx.fillRect(0, 0, c.width, c.height);
       ctx.drawImage(img, 0, 0, c.width, c.height);
       c.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG export failed'))), 'image/png');

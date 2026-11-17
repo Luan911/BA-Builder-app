@@ -3,6 +3,7 @@ import { project } from '../store.js';
 import { esc, pill } from '../ui.js';
 import { lintRequirement, riskScore, riskLevel, nameOf, businessCase } from '../model.js';
 import { rtmRows } from '../gen/exports.js';
+import { STEPS, startNewSrs } from './wizard.js';
 
 /** Completeness checks across the BA lifecycle. Each returns [done, label, link]. */
 export function readiness(p) {
@@ -40,6 +41,7 @@ export function renderDashboard(root) {
 
   root.innerHTML = `
     <div class="page-head"><div><h1>${esc(p.meta.name || 'Untitled project')}</h1><p>${esc(p.meta.summary || 'Start with the project charter: problem, vision and scope.')}</p></div></div>
+    <section class="card" style="margin-bottom:16px;border-left:4px solid var(--green)"><div class="row"><div class="grow"><h2>Write an SRS step by step</h2><p class="muted" style="margin:4px 0 0">A guided ${STEPS.length}-step path from a blank page to a finished, checked Software Requirements Specification.</p></div><a class="btn" href="#/srs/1">Continue this project's SRS</a><button class="btn primary lg" data-newsrs2>+ New SRS</button></div></section>
     <div class="grid g4">
       ${stat(p.requirements.length, 'Requirements', '#/c/requirements')}
       ${stat(p.stories.length, `User stories · ${p.stories.reduce((a, s) => a + (+s.points || 0), 0)} pts`, '#/board')}
@@ -73,4 +75,5 @@ export function renderDashboard(root) {
         ${[['#/docs', 'Documents', '18 deliverables: BRD, SRS, business case, RTM, UAT…'], ['#/diagrams', 'Diagrams', 'BPMN flows, ERD, use case, sequence, state, context…'], ['#/studio', 'Diagram studio', 'Write any Mermaid diagram from templates'], ['#/canvas', 'Whiteboard', 'Drag-and-drop flowcharts and wireframes'], ['#/board', 'Backlog board', 'Drag stories across the workflow'], ['#/prioritise', 'Prioritisation', 'MoSCoW, RICE and WSJF'], ['#/trace', 'Traceability', 'Objective → requirement → story → test'], ['#/settings', 'Exports', 'OpenAPI, SQL, JSON Schema, CSV, project file']].map(([h, t, d]) => `<a class="stat" href="${h}"><b style="font-size:15px">${t}</b><span>${d}</span></a>`).join('')}
       </div>
     </section>`;
+  root.querySelector('[data-newsrs2]').onclick = () => startNewSrs();
 }

@@ -8,8 +8,10 @@ const SHAPES = {
   Flow: [['process', 'Process', 140, 60], ['terminal', 'Start / end', 140, 50], ['decision', 'Decision', 120, 90], ['data', 'Input / output', 150, 60], ['database', 'Database', 110, 80], ['document', 'Document', 130, 70], ['actor', 'Actor', 60, 90], ['note', 'Sticky note', 150, 100], ['text', 'Text', 140, 30], ['lane', 'Swimlane', 700, 150]],
   Wireframe: [['screen', 'Screen', 360, 520], ['header', 'Header bar', 340, 44], ['button', 'Button', 120, 36], ['input', 'Text input', 240, 36], ['image', 'Image', 160, 110], ['list', 'List', 260, 120], ['checkbox', 'Checkbox', 160, 24]],
 };
-const FILL = { process: '#e6f6f4', terminal: '#dcfce7', decision: '#fef3c7', data: '#dbeafe', database: '#ede9fe', document: '#f1f5f9', actor: 'none', note: '#fef9c3', text: 'none', lane: '#f8fafc', screen: '#ffffff', header: '#334155', button: '#0f766e', input: '#ffffff', image: '#e2e8f0', list: '#ffffff', checkbox: 'none' };
-const STROKE = '#334155';
+const FILL = { process: '#0d2416', terminal: '#0d2416', decision: '#2a0e0e', data: '#111111', database: '#0d2416', document: '#111111', actor: 'none', note: '#2a0e0e', text: 'none', lane: '#070707', screen: '#050505', header: '#1c1c1c', button: '#22c55e', input: '#000000', image: '#141414', list: '#0a0a0a', checkbox: 'none' };
+const STROKE = '#22c55e';
+const RED = '#ef4444';
+const TEXT = '#f2f2f2';
 
 let state = null; // { canvasId, sel: {kind, id}, zoom, panX, panY }
 
@@ -18,27 +20,26 @@ function shapeSvg(n) {
   const f = n.fill || FILL[n.type] || '#fff';
   const s = `stroke="${STROKE}" stroke-width="1.5"`;
   switch (n.type) {
-    case 'terminal': return `<rect width="${w}" height="${h}" rx="${h / 2}" fill="${f}" ${s}/>`;
-    case 'decision': return `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" fill="${f}" ${s}/>`;
+    case 'terminal': return `<rect width="${w}" height="${h}" rx="${h / 2}" fill="${f}" stroke="${STROKE}" stroke-width="2.5"/>`;
+    case 'decision': return `<polygon points="${w / 2},0 ${w},${h / 2} ${w / 2},${h} 0,${h / 2}" fill="${f}" stroke="${RED}" stroke-width="1.5"/>`;
     case 'data': return `<polygon points="${w * 0.15},0 ${w},0 ${w * 0.85},${h} 0,${h}" fill="${f}" ${s}/>`;
     case 'database': return `<path d="M0,10 a${w / 2},10 0 0,0 ${w},0 v${h - 20} a${w / 2},10 0 0,1 -${w},0 z" fill="${f}" ${s}/><ellipse cx="${w / 2}" cy="10" rx="${w / 2}" ry="10" fill="${f}" ${s}/>`;
     case 'document': return `<path d="M0,0 H${w} V${h - 10} Q${w * 0.75},${h - 22} ${w / 2},${h - 10} T0,${h - 10} Z" fill="${f}" ${s}/>`;
-    case 'actor': return `<rect width="${w}" height="${h}" fill="transparent"/><g stroke="${STROKE}" stroke-width="2" fill="none"><circle cx="${w / 2}" cy="12" r="10"/><path d="M${w / 2},22 V${h - 38} M${w / 2 - 20},36 H${w / 2 + 20} M${w / 2},${h - 38} L${w / 2 - 16},${h - 18} M${w / 2},${h - 38} L${w / 2 + 16},${h - 18}"/></g>`;
-    case 'note': return `<path d="M0,0 H${w} V${h - 16} L${w - 16},${h} H0 Z" fill="${f}" stroke="#ca8a04" stroke-width="1.2"/>`;
-    case 'text': case 'checkbox': return `<rect width="${w}" height="${h}" fill="transparent" stroke="${n.type === 'checkbox' ? 'none' : '#cbd5e1'}" stroke-dasharray="3 3"/>${n.type === 'checkbox' ? `<rect x="2" y="${h / 2 - 8}" width="16" height="16" rx="3" fill="#fff" ${s}/>` : ''}`;
-    case 'lane': return `<rect width="${w}" height="${h}" fill="${f}" ${s}/><rect width="34" height="${h}" fill="#e2e8f0" ${s}/>`;
-    case 'screen': return `<rect width="${w}" height="${h}" rx="14" fill="${f}" stroke="#0f172a" stroke-width="2"/><rect x="${w / 2 - 30}" y="8" width="60" height="6" rx="3" fill="#cbd5e1"/>`;
+    case 'actor': return `<rect width="${w}" height="${h}" fill="transparent"/><g stroke="${TEXT}" stroke-width="2" fill="none"><circle cx="${w / 2}" cy="12" r="10"/><path d="M${w / 2},22 V${h - 38} M${w / 2 - 20},36 H${w / 2 + 20} M${w / 2},${h - 38} L${w / 2 - 16},${h - 18} M${w / 2},${h - 38} L${w / 2 + 16},${h - 18}"/></g>`;
+    case 'note': return `<path d="M0,0 H${w} V${h - 16} L${w - 16},${h} H0 Z" fill="${f}" stroke="${RED}" stroke-width="1.2"/>`;
+    case 'text': case 'checkbox': return `<rect width="${w}" height="${h}" fill="transparent" stroke="${n.type === 'checkbox' ? 'none' : '#3a3a3a'}" stroke-dasharray="3 3"/>${n.type === 'checkbox' ? `<rect x="2" y="${h / 2 - 8}" width="16" height="16" rx="3" fill="#000" ${s}/>` : ''}`;
+    case 'lane': return `<rect width="${w}" height="${h}" fill="${f}" ${s}/><rect width="34" height="${h}" fill="#2a0e0e" stroke="${RED}" stroke-width="1.5"/>`;
+    case 'screen': return `<rect width="${w}" height="${h}" rx="14" fill="${f}" stroke="#3a3a3a" stroke-width="2"/><rect x="${w / 2 - 30}" y="8" width="60" height="6" rx="3" fill="#3a3a3a"/>`;
     case 'header': return `<rect width="${w}" height="${h}" rx="4" fill="${f}"/>`;
     case 'button': return `<rect width="${w}" height="${h}" rx="8" fill="${f}"/>`;
-    case 'input': return `<rect width="${w}" height="${h}" rx="6" fill="${f}" stroke="#94a3b8" stroke-width="1.2"/>`;
-    case 'image': return `<rect width="${w}" height="${h}" fill="${f}" stroke="#94a3b8"/><path d="M0,0 L${w},${h} M${w},0 L0,${h}" stroke="#94a3b8"/>`;
-    case 'list': return `<rect width="${w}" height="${h}" fill="${f}" stroke="#94a3b8"/>${[1, 2, 3].map((i) => `<line x1="0" x2="${w}" y1="${(h / 4) * i}" y2="${(h / 4) * i}" stroke="#e2e8f0"/>`).join('')}`;
+    case 'input': return `<rect width="${w}" height="${h}" rx="6" fill="${f}" stroke="#4a4a4a" stroke-width="1.2"/>`;
+    case 'image': return `<rect width="${w}" height="${h}" fill="${f}" stroke="#4a4a4a"/><path d="M0,0 L${w},${h} M${w},0 L0,${h}" stroke="#4a4a4a"/>`;
+    case 'list': return `<rect width="${w}" height="${h}" fill="${f}" stroke="#4a4a4a"/>${[1, 2, 3].map((i) => `<line x1="0" x2="${w}" y1="${(h / 4) * i}" y2="${(h / 4) * i}" stroke="#262626"/>`).join('')}`;
     default: return `<rect width="${w}" height="${h}" rx="6" fill="${f}" ${s}/>`;
   }
 }
 
 function textSvg(n) {
-  const light = ['header', 'button'].includes(n.type);
   const maxChars = Math.max(4, Math.floor((n.type === 'decision' ? n.w * 0.6 : n.w - 16) / 7.2));
   const lines = [];
   for (const raw of String(n.text || '').split('\n')) {
@@ -52,11 +53,11 @@ function textSvg(n) {
   const lh = 16;
   let x = n.w / 2, y = n.h / 2 - ((lines.length - 1) * lh) / 2, anchor = 'middle';
   if (n.type === 'actor') y = n.h - 4 + lh / 2;
-  if (n.type === 'lane') return `<text transform="translate(17 ${n.h / 2}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" fill="#0f172a">${esc(n.text)}</text>`;
+  if (n.type === 'lane') return `<text transform="translate(17 ${n.h / 2}) rotate(-90)" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="600" fill="${TEXT}">${esc(n.text)}</text>`;
   if (['input', 'checkbox', 'list'].includes(n.type) || n.type === 'note') { x = n.type === 'checkbox' ? 26 : 10; anchor = 'start'; }
   if (n.type === 'list' || n.type === 'note') y = 18;
   if (n.type === 'screen') y = 30;
-  return `<text text-anchor="${anchor}" font-size="13" fill="${light ? '#ffffff' : n.type === 'input' ? '#64748b' : '#0f172a'}" font-family="Segoe UI, Arial, sans-serif">${lines.map((l, i) => `<tspan x="${x}" y="${y + i * lh}" dominant-baseline="central">${esc(l)}</tspan>`).join('')}</text>`;
+  return `<text text-anchor="${anchor}" font-size="13" fill="${n.type === 'button' ? '#000000' : n.type === 'input' ? '#8c8c8c' : TEXT}" font-family="Segoe UI, Arial, sans-serif">${lines.map((l, i) => `<tspan x="${x}" y="${y + i * lh}" dominant-baseline="central">${esc(l)}</tspan>`).join('')}</text>`;
 }
 
 function border(n, tx, ty) {
@@ -75,7 +76,7 @@ function edgeSvg(e, nodes, sel) {
   const [x1, y1] = border(a, b.x + b.w / 2, b.y + b.h / 2);
   const [x2, y2] = border(b, a.x + a.w / 2, a.y + a.h / 2);
   const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-  return `<g class="edge ${sel ? 'sel' : ''}" data-edge="${e.id}"><path d="M${x1},${y1} L${x2},${y2}" stroke="transparent" stroke-width="12"/><path d="M${x1},${y1} L${x2},${y2}" stroke="#475569" stroke-width="1.6" fill="none" ${e.dashed ? 'stroke-dasharray="6 4"' : ''} marker-end="${e.arrow === false ? '' : 'url(#arr)'}"/>${e.label ? `<rect x="${mx - e.label.length * 3.6 - 4}" y="${my - 10}" width="${e.label.length * 7.2 + 8}" height="20" rx="4" fill="#fff"/><text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#334155" font-family="Segoe UI, Arial, sans-serif">${esc(e.label)}</text>` : ''}</g>`;
+  return `<g class="edge ${sel ? 'sel' : ''}" data-edge="${e.id}"><path d="M${x1},${y1} L${x2},${y2}" stroke="transparent" stroke-width="12"/><path d="M${x1},${y1} L${x2},${y2}" stroke="${RED}" stroke-width="1.6" fill="none" ${e.dashed ? 'stroke-dasharray="6 4"' : ''} marker-end="${e.arrow === false ? '' : 'url(#arr)'}"/>${e.label ? `<rect x="${mx - e.label.length * 3.6 - 4}" y="${my - 10}" width="${e.label.length * 7.2 + 8}" height="20" rx="4" fill="#000"/><text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="central" font-size="12" fill="${TEXT}" font-family="Segoe UI, Arial, sans-serif">${esc(e.label)}</text>` : ''}</g>`;
 }
 
 export function exportSvg(c) {
@@ -83,7 +84,7 @@ export function exportSvg(c) {
   if (!ns.length) return '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>';
   const minX = Math.min(...ns.map((n) => n.x)) - 20, minY = Math.min(...ns.map((n) => n.y)) - 20;
   const maxX = Math.max(...ns.map((n) => n.x + n.w)) + 20, maxY = Math.max(...ns.map((n) => n.y + n.h)) + 40;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX - minX} ${maxY - minY}" width="${maxX - minX}" height="${maxY - minY}"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs><rect x="${minX}" y="${minY}" width="${maxX - minX}" height="${maxY - minY}" fill="#fff"/>${ns.map((n) => `<g transform="translate(${n.x} ${n.y})">${shapeSvg(n)}${textSvg(n)}</g>`).join('')}${c.edges.map((e) => edgeSvg(e, ns, false)).join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX - minX} ${maxY - minY}" width="${maxX - minX}" height="${maxY - minY}"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ef4444"/></marker></defs><rect x="${minX}" y="${minY}" width="${maxX - minX}" height="${maxY - minY}" fill="#000"/>${ns.map((n) => `<g transform="translate(${n.x} ${n.y})">${shapeSvg(n)}${textSvg(n)}</g>`).join('')}${c.edges.map((e) => edgeSvg(e, ns, false)).join('')}</svg>`;
 }
 
 export function renderCanvas(root, id) {
@@ -96,7 +97,7 @@ export function renderCanvas(root, id) {
       <button class="btn primary" data-new>+ New board</button></div>
     ${c0 ? `<div class="canvas-wrap">
       <div class="card palette">${Object.entries(SHAPES).map(([g, list]) => `<div class="nav-label" style="padding-left:0">${g}</div>${list.map(([t, l]) => `<button class="btn sm" data-shape="${t}">${esc(l)}</button>`).join('')}`).join('')}</div>
-      <div class="canvas" data-canvas><svg data-svg tabindex="0" aria-label="Whiteboard"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs><g data-world></g><line data-ghost stroke="#0f766e" stroke-width="2" stroke-dasharray="4 3" visibility="hidden"/></svg></div>
+      <div class="canvas" data-canvas><svg data-svg tabindex="0" aria-label="Whiteboard"><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#ef4444"/></marker></defs><g data-world></g><line data-ghost stroke="#ef4444" stroke-width="2" stroke-dasharray="4 3" visibility="hidden"/></svg></div>
       <div class="card inspector" data-insp></div>
     </div>` : '<div class="card empty">No boards yet. Create one to start drawing.</div>'}`;
 
@@ -119,7 +120,7 @@ export function renderCanvas(root, id) {
   // Redraw shapes + connectors. The inspector is rebuilt only by draw(), so typing keeps focus.
   const drawShapes = () => {
     world.setAttribute('transform', `translate(${state.panX} ${state.panY}) scale(${state.zoom})`);
-    world.innerHTML = c.nodes.map((n) => `<g class="node ${state.sel?.id === n.id ? 'sel' : ''}" data-node="${n.id}" transform="translate(${n.x} ${n.y})">${shapeSvg(n)}${textSvg(n)}${n.type !== 'lane' && n.type !== 'screen' ? `<circle class="port" data-port="${n.id}" cx="${n.w}" cy="${n.h / 2}" r="6"/>` : ''}${state.sel?.id === n.id ? `<rect data-resize="${n.id}" x="${n.w - 5}" y="${n.h - 5}" width="10" height="10" fill="#0f766e" style="cursor:nwse-resize"/>` : ''}</g>`).join('') +
+    world.innerHTML = c.nodes.map((n) => `<g class="node ${state.sel?.id === n.id ? 'sel' : ''}" data-node="${n.id}" transform="translate(${n.x} ${n.y})">${shapeSvg(n)}${textSvg(n)}${n.type !== 'lane' && n.type !== 'screen' ? `<circle class="port" data-port="${n.id}" cx="${n.w}" cy="${n.h / 2}" r="6"/>` : ''}${state.sel?.id === n.id ? `<rect data-resize="${n.id}" x="${n.w - 5}" y="${n.h - 5}" width="10" height="10" fill="#ef4444" style="cursor:nwse-resize"/>` : ''}</g>`).join('') +
       c.edges.map((e) => edgeSvg(e, c.nodes, state.sel?.id === e.id)).join('');
   };
   const draw = () => (drawShapes(), inspector());

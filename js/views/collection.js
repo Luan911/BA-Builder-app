@@ -6,45 +6,48 @@ import { toCsv } from '../gen/exports.js';
 
 const filterState = {};
 
-export function renderCollection(root, key, { heading = true, extra = '' } = {}) {
+export function renderCollection(root, key, opts = {}) {
+  const { heading = true, extra = '', where = null, preset = {}, title = '', addLabel = '', stateKey = key } = opts;
   const c = COLLECTIONS[key];
   const p = project();
-  const st = (filterState[key] ||= { q: '' });
-  let items = [...p[key]];
+  const st = (filterState[stateKey] ||= { q: '' });
+  const all = where ? p[key].filter(where) : p[key];
+  let items = [...all];
   if (c.sort) items.sort(c.sort);
   const q = st.q.toLowerCase();
   if (q) items = items.filter((it) => JSON.stringify(it).toLowerCase().includes(q));
-  for (const f of Object.keys(c.filters || {})) if (st[f]) items = items.filter((it) => it[f] === st[f]);
+  const filters = opts.noFilters ? {} : c.filters || {};
+  for (const f of Object.keys(filters)) if (st[f]) items = items.filter((it) => it[f] === st[f]);
 
   root.innerHTML = `
     ${heading ? `<div class="page-head"><div><h1>${esc(c.title)}</h1>${c.intro ? `<p>${esc(c.intro)}</p>` : ''}</div></div>` : ''}
     ${extra}
     <section class="card flush">
       <div class="card-head">
-        ${heading ? '' : `<h2>${esc(c.title)}</h2>`}
+        ${heading ? '' : `<h2>${esc(title || c.title)}</h2>`}
         <input type="search" placeholder="Search…" value="${esc(st.q)}" data-q style="max-width:220px" aria-label="Search ${esc(c.title)}">
-        ${Object.entries(c.filters || {}).map(([f, vals]) => `<select data-f="${f}" style="max-width:160px" aria-label="Filter by ${f}"><option value="">All ${f}</option>${vals.map((v) => `<option ${st[f] === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`).join('')}
+        ${Object.entries(filters).map(([f, vals]) => `<select data-f="${f}" style="max-width:160px" aria-label="Filter by ${f}"><option value="">All ${f}</option>${vals.map((v) => `<option ${st[f] === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`).join('')}
         <span class="grow"></span>
-        <span class="muted small">${items.length} of ${p[key].length}</span>
+        <span class="muted small">${items.length} of ${all.length}</span>
         <button class="btn sm" data-csv>Export CSV</button>
-        <button class="btn sm primary" data-add>+ Add ${esc(c.singular)}</button>
+        <button class="btn sm primary" data-add>+ ${esc(addLabel || `Add ${c.singular}`)}</button>
       </div>
       ${items.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr>${c.cols.map(([h, , cls]) => `<th class="${cls || ''}">${esc(h)}</th>`).join('')}</tr></thead>
         <tbody>${items.map((it) => `<tr class="click" data-id="${esc(it.id)}" tabindex="0">${c.cols.map(([, fn, cls]) => `<td class="${cls || ''}">${fn(it, p)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
-        : `<div class="empty">${p[key].length ? 'Nothing matches the filter.' : `No ${esc(c.title.toLowerCase())} yet.`}</div>`}
+        : `<div class="empty">${all.length ? 'Nothing matches the filter.' : `Nothing here yet — click “${esc(addLabel || `Add ${c.singular}`)}”.`}</div>`}
     </section>`;
 
   const search = $('[data-q]', root);
   search.addEventListener('input', () => {
     st.q = search.value;
     const pos = search.selectionStart;
-    renderCollection(root, key, { heading, extra });
+    renderCollection(root, key, opts);
     const s = $('[data-q]', root);
     s.focus();
     s.setSelectionRange(pos, pos);
   });
-  $$('[data-f]', root).forEach((s) => (s.onchange = () => ((st[s.dataset.f] = s.value), renderCollection(root, key, { heading, extra }))));
-  $('[data-add]', root).onclick = () => openItem(key, null);
+  $$('[data-f]', root).forEach((s) => (s.onchange = () => ((st[s.dataset.f] = s.value), renderCollection(root, key, opts))));
+  $('[data-add]', root).onclick = () => openItem(key, null, preset);
   $('[data-csv]', root).onclick = () => download(toCsv(key, p), `${fileSafe(c.title)}.csv`, 'text/csv');
   $$('tr[data-id]', root).forEach((tr) => {
     tr.onclick = () => openItem(key, tr.dataset.id);

@@ -114,7 +114,6 @@ export function renderSettings(root) {
 
     <section class="card"><h2>Preferences</h2>
       <div class="form" style="margin-top:10px">
-        <label class="field"><span>Theme</span><select data-theme>${['auto', 'light', 'dark'].map((t) => `<option ${s.theme === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
         <label class="field"><span>Organisation (document footer)</span><input type="text" data-org value="${esc(s.org)}"></label>
       </div>
     </section>`;
@@ -166,6 +165,5 @@ export function renderSettings(root) {
     const key = $('[data-ckey]', root).value;
     download(`${COLLECTIONS[key].fields.filter((f) => !['multi', 'rows'].includes(f.type) && !(f.type === 'select' && typeof f.options === 'function')).map((f) => f.label).join(',')}\r\n`, `${fileSafe(COLLECTIONS[key].title)}_template.csv`, 'text/csv');
   };
-  $('[data-theme]', root).onchange = (e) => saveSettings({ theme: e.target.value });
   $('[data-org]', root).onchange = (e) => saveSettings({ org: e.target.value.trim() });
 }

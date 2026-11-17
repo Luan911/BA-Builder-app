@@ -14,10 +14,10 @@ code{font-family:Consolas,monospace;font-size:9.5pt;background:#f1f5f9}pre{backg
 async function drawDiagrams(el, mode = 'svg') {
   for (const box of $$('.mmd', el)) {
     try {
-      const svg = await render(box.dataset.code);
+      const svg = await render(box.dataset.code, { light: box.dataset.light === '1' });
       if (mode === 'svg') box.innerHTML = svg;
       else {
-        const blob = await svgToPng(svg, 1.6);
+        const blob = await svgToPng(svg, 1.6, '#ffffff');
         const url = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
         const { w } = sized(svg);
         box.outerHTML = `<p><img src="${url}" width="${Math.min(640, Math.round(w))}" alt="Diagram"></p>`;
@@ -32,6 +32,7 @@ export async function docHtml(p, id, mode = 'png') {
   const doc = buildDoc(p, id);
   const div = document.createElement('div');
   div.innerHTML = mdToHtml(doc.markdown);
+  div.querySelectorAll('.mmd').forEach((m) => (m.dataset.light = '1'));
   await drawDiagrams(div, mode);
   const org = getSettings().org;
   return `<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>${PAPER_CSS}</style></head><body>${div.innerHTML}<p class="footer">${esc(org ? `${org} · ` : '')}${esc(p.meta.name)} · ${esc(doc.title)} · v${esc(p.meta.version)} · Generated with BA Builder</p></body></html>`;

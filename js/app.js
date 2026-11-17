@@ -1,5 +1,5 @@
-// App shell: navigation, routing, project switcher, theme, undo.
-import { load, project, projects, subscribe, switchProject, undo, getSettings, saveSettings, saved } from './store.js';
+// App shell: navigation, routing, project switcher, undo.
+import { load, project, projects, subscribe, switchProject, undo, saved } from './store.js';
 import { esc, $, $$, toast } from './ui.js';
 import { renderCollection } from './views/collection.js';
 import { renderDashboard } from './views/dashboard.js';
@@ -16,10 +16,11 @@ import { renderCanvas } from './views/canvas.js';
 import { renderDocuments } from './views/documents.js';
 import { renderSettings } from './views/settings.js';
 import { renderDecisionTables } from './views/decisiontables.js';
+import { renderWizard, startNewSrs } from './views/wizard.js';
 
 // [route, label, count-key]
 const NAV = [
-  ['Overview', [['', 'Dashboard'], ['charter', 'Project charter']]],
+  ['Overview', [['', 'Dashboard'], ['srs', 'SRS wizard (step by step)'], ['charter', 'Project charter']]],
   ['Strategy', [['c/objectives', 'Objectives', 'objectives'], ['strategy', 'SWOT & PESTLE'], ['c/gaps', 'Gap analysis', 'gaps'], ['business-case', 'Business case']]],
   ['Stakeholders', [['stakeholders', 'Stakeholders & RACI', 'stakeholders'], ['c/personas', 'Personas & actors', 'personas'], ['c/elicitation', 'Elicitation sessions', 'elicitation'], ['c/questions', 'Open questions', 'questions']]],
   ['Requirements', [['c/requirements', 'Requirements', 'requirements'], ['c/stories', 'User stories', 'stories'], ['board', 'Backlog board'], ['prioritise', 'Prioritisation'], ['c/usecases', 'Use cases', 'usecases'], ['c/rules', 'Business rules', 'rules'], ['decision-tables', 'Decision tables', 'decisionTables'], ['c/tests', 'Test cases (UAT)', 'tests'], ['trace', 'Traceability']]],
@@ -33,6 +34,7 @@ function shell() {
     <div class="layout">
       <aside class="side" aria-label="Navigation">
         <div class="brand"><i>BA</i> BA Builder</div>
+        <div class="cta"><button class="btn primary" data-newsrs style="width:100%;justify-content:center">+ New SRS</button></div>
         <nav>${NAV.map(([g, items]) => `<div class="nav-group"><div class="nav-label">${esc(g)}</div>${items.map(([r, l, k]) => `<a class="nav" href="#/${r}" data-r="${r}">${esc(l)}${k ? `<span class="cnt" data-cnt="${k}"></span>` : ''}</a>`).join('')}</div>`).join('')}</nav>
       </aside>
       <div class="scrim" data-scrim></div>
@@ -43,7 +45,6 @@ function shell() {
           <span class="muted small" data-saved></span>
           <span class="grow"></span>
           <button class="btn sm" data-undo title="Undo (Ctrl+Z)">↶ Undo</button>
-          <button class="btn sm" data-theme title="Toggle theme">◐</button>
         </header>
         <main id="view" tabindex="-1"></main>
       </div>
@@ -51,17 +52,8 @@ function shell() {
   $('[data-menu]').onclick = () => document.body.classList.toggle('nav-open');
   $('[data-scrim]').onclick = () => document.body.classList.remove('nav-open');
   $('[data-undo]').onclick = () => toast(undo() ? 'Undone' : 'Nothing to undo');
-  $('[data-theme]').onclick = () => {
-    const dark = document.documentElement.dataset.theme === 'dark';
-    saveSettings({ theme: dark ? 'light' : 'dark' });
-  };
+  $('[data-newsrs]').onclick = () => startNewSrs();
   $('[data-proj]').onchange = (e) => (e.target.value === '__manage' ? (location.hash = '#/settings') : switchProject(e.target.value));
-}
-
-function applyTheme() {
-  const t = getSettings().theme;
-  const dark = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
 }
 
 function chrome() {
@@ -79,6 +71,7 @@ function route() {
   try {
     if (!a) renderDashboard(v);
     else if (a === 'c' && b) renderCollection(v, b);
+    else if (a === 'srs') renderWizard(v, b);
     else if (a === 'charter') renderCharter(v);
     else if (a === 'strategy') renderStrategy(v);
     else if (a === 'business-case') renderBusinessCase(v);
@@ -112,7 +105,6 @@ function renderDataModel(v) {
 function start() {
   load();
   shell();
-  applyTheme();
   chrome();
   route();
   window.addEventListener('hashchange', () => {
@@ -120,7 +112,6 @@ function start() {
     window.scrollTo(0, 0);
   });
   subscribe((info) => {
-    if (info.settings) applyTheme();
     chrome();
     if (info.rerender && !document.querySelector('.backdrop')) {
       const y = window.scrollY;
@@ -128,7 +119,7 @@ function start() {
       window.scrollTo(0, y);
     } else if (info.rerender) {
       // a modal is open (e.g. just saved and closing) — re-render on the next frame
-      requestAnimationFrame(() => !document.querySelector('.backdrop') && route());
+      setTimeout(() => !document.querySelector('.backdrop') && route(), 0);
     }
   });
   document.addEventListener('keydown', (e) => {

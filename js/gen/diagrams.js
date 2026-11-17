@@ -7,12 +7,12 @@ const word = (s) => String(s ?? '').replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/
 const ident = (s) => String(s ?? '').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1') || 'Unnamed';
 
 const STYLE = [
-  'classDef start fill:#dcfce7,stroke:#16a34a,color:#14532d',
-  'classDef finish fill:#fee2e2,stroke:#dc2626,color:#7f1d1d',
-  'classDef decision fill:#fef3c7,stroke:#d97706,color:#78350f',
-  'classDef task fill:#e6f6f4,stroke:#0f766e,color:#0b3b37',
-  'classDef sub fill:#ede9fe,stroke:#7c3aed,color:#3b0764',
-  'classDef pain stroke:#dc2626,stroke-width:3px',
+  'classDef start fill:#0d2416,stroke:#22c55e,stroke-width:2px,color:#f2f2f2',
+  'classDef finish fill:#2a0e0e,stroke:#ef4444,stroke-width:2px,color:#f2f2f2',
+  'classDef decision fill:#1a0b0b,stroke:#ef4444,color:#f2f2f2',
+  'classDef task fill:#0d2416,stroke:#22c55e,color:#f2f2f2',
+  'classDef sub fill:#111111,stroke:#4ade80,stroke-dasharray:4 3,color:#f2f2f2',
+  'classDef pain stroke:#ef4444,stroke-width:3px',
 ];
 
 // ---------- Process (BPMN-style swimlanes) ----------
@@ -70,7 +70,7 @@ export function useCaseDiagram(p) {
     for (const s of u.secondary || []) L.push(`  ${id('U', u.id)} --- ${id('A', s)}`);
     for (const inc of u.includes || []) if (byId(p.usecases, inc)) L.push(`  ${id('U', u.id)} -.->|include| ${id('U', inc)}`);
   }
-  L.push('  classDef default fill:#e6f6f4,stroke:#0f766e,color:#0b3b37');
+  L.push('  classDef default fill:#0d2416,stroke:#22c55e,color:#f2f2f2');
   if (!p.usecases.length) L.push(`  EMPTY[${q('Add use cases to draw this diagram')}]`);
   return L.join('\n');
 }
@@ -183,7 +183,7 @@ export function contextDiagram(p) {
     else if (i.direction === 'Two-way') L.push(`  SYS <-->|${lab}| ${x}`);
     else L.push(`  SYS -->|${lab}| ${x}`);
   });
-  L.push('  classDef person fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a', '  classDef sys fill:#0f766e,stroke:#0b3b37,color:#ffffff,font-weight:bold', '  classDef ext fill:#f1f5f9,stroke:#64748b,color:#1e293b');
+  L.push('  classDef person fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef sys fill:#22c55e,stroke:#15803d,color:#000000,font-weight:bold', '  classDef ext fill:#111111,stroke:#8c8c8c,color:#f2f2f2');
   return L.join('\n');
 }
 
@@ -262,7 +262,7 @@ export function traceGraph(p) {
     (t.requirementIds || []).forEach((r) => byId(p.requirements, r) && L.push(`  ${id('R', r)} -.-> ${id('T', t.id)}`));
     (t.storyIds || []).forEach((s) => byId(p.stories, s) && L.push(`  ${id('U', s)} -.-> ${id('T', t.id)}`));
   }
-  L.push('  classDef obj fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a', '  classDef req fill:#e6f6f4,stroke:#0f766e,color:#0b3b37', '  classDef story fill:#ede9fe,stroke:#7c3aed,color:#3b0764', '  classDef test fill:#f1f5f9,stroke:#64748b', '  classDef pass fill:#dcfce7,stroke:#16a34a', '  classDef fail fill:#fee2e2,stroke:#dc2626');
+  L.push('  classDef obj fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef req fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef story fill:#111111,stroke:#4ade80,color:#f2f2f2', '  classDef test fill:#111111,stroke:#8c8c8c,color:#f2f2f2', '  classDef pass fill:#22c55e,stroke:#15803d,color:#000000', '  classDef fail fill:#ef4444,stroke:#b91c1c,color:#000000');
   return L.join('\n');
 }
 

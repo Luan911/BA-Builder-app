@@ -4,6 +4,29 @@ A complete workspace for **Technical Business Analysts** — from strategy and e
 through requirements and solution modelling, to diagrams, documentation and technical
 specifications. Plain HTML, CSS and JavaScript: no build step, no server, no account.
 
+## Write an SRS step by step
+
+Click **+ New SRS** (top of the sidebar) and follow 10 guided steps:
+
+1. Introduction — system name, purpose, who signs off
+2. Problem & scope — problem, vision, in scope / out of scope, constraints
+3. Business objectives — measurable targets
+4. Users & stakeholders — user types, external systems, approvers
+5. Functional requirements — "The system shall…", checked for quality as you type, with Given/When/Then
+6. Quality requirements (NFRs) — one-click templates for performance, availability, security, privacy and more
+7. Use cases *(optional)*
+8. Data & interfaces *(optional)*
+9. Business rules & assumptions *(optional)*
+10. Review & export — completeness checklist, live preview, download as Word, PDF or Markdown
+
+Each step explains what to write, gives an example, and turns green when it is complete.
+You can leave at any time and continue later from **SRS wizard** in the sidebar.
+
+## Look
+A single dark theme: black background, green for primary actions and progress, red for
+accents and warnings. Diagrams use the same colours on screen; Word and HTML exports use a
+light version so they print cleanly on white paper.
+
 ## What it covers
 
 | Area | Tools |
