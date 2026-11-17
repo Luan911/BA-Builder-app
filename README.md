@@ -47,8 +47,21 @@ light version so they print cleanly on white paper.
 Generated from your data, always in sync: system context, BPMN-style process flows,
 use case, sequence (from use case flows), state machine, ERD, class, decision flow,
 stakeholder map, traceability graph, value vs effort, scope mind map, release roadmap,
-delivery schedule (Gantt from the estimate). Very large projects get condensed versions of the
-trace graph, ERD and class diagram so the page never freezes; the matrix and documents keep every item.
+delivery schedule (Gantt from the estimate).
+
+**Big models stay readable.** Traceability is also drawn one graph per objective, and the data model
+one diagram per area (set an entity's *Area*, or the app groups linked entities for you). Links to
+other areas show as small stub boxes. Documents switch to these split diagrams automatically when a
+model is too big for one page, so every item is drawn somewhere.
+
+**Focus view.** Pick any objective, requirement, story, test, use case, rule, API, entity and more, and
+see everything linked to it 1–4 links away. Click a box to refocus, double-click to edit it. Every editor
+has a **Show links** button that opens it.
+
+**Viewer.** Fit to width, zoom, *Find a box* (highlights matches), click any box to open the item behind
+it, and an optional **Tidy layout** (ELK engine: square-cornered lines, fewer crossings) that is also
+used in exported documents. Word exports put wide diagrams on landscape pages at print resolution;
+HTML exports keep diagrams as sharp, zoomable SVG.
 
 Plus:
 - **Diagram studio** — any Mermaid diagram with live preview and 17 BA templates
@@ -105,9 +118,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-147 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+168 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs
@@ -121,8 +134,8 @@ A generated project of 2 000–6 600 items full of awkward text (quotes, pipes, 
 emoji, Chinese, very long names) must build every document, diagram and export with no
 `undefined` / `NaN`, in seconds.
 
-**In the browser:** serve the folder and open `http://localhost:8080/tests/browser.html`. It draws all
-137 diagrams (example, empty, stress x1 and x3 projects, print theme, studio templates) and fails any that
+**In the browser:** serve the folder and open `http://localhost:8080/tests/browser.html`. It draws every
+diagram: example, empty and stress x1 / x3 projects, print theme, studio templates, tidy layout and focus views, and fails any that
 error, come out empty or take longer than 10 seconds.
 
 ## Project structure

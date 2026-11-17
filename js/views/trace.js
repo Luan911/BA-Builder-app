@@ -49,6 +49,6 @@ export function renderTrace(root) {
       ['Gaps', p.gaps.filter((g) => (g.requirementIds || []).includes(id)).map((g) => g.code)],
       ['Change requests', p.changes.filter((c) => (c.requirementIds || []).includes(id)).map((c) => c.code)],
     ];
-    out.innerHTML = `<table class="tbl"><tbody>${hit.map(([k, v]) => `<tr><td style="width:200px"><b>${k}</b></td><td>${list(v)}</td></tr>`).join('')}</tbody></table>`;
+    out.innerHTML = `<table class="tbl"><tbody>${hit.map(([k, v]) => `<tr><td style="width:200px"><b>${k}</b></td><td>${list(v)}</td></tr>`).join('')}</tbody></table><p style="margin:10px 0 0"><a class="btn sm" href="#/diagrams/${encodeURIComponent(`focus:requirements:${id}:2`)}">See it as a diagram →</a></p>`;
   };
 }

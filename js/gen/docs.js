@@ -10,6 +10,8 @@ const list = (a, empty = '_None recorded._') => (a && a.length ? a.map((x) => `-
 const ol = (a, empty = '_None recorded._') => (a && a.length ? a.map((x, i) => `${i + 1}. ${x}`).join('\n') : empty);
 const or = (v, f = '_To be confirmed._') => (String(v ?? '').trim() ? v : f);
 const mmd = (code) => `\`\`\`mermaid\n${code}\n\`\`\``;
+/** One diagram, or a heading + diagram per part when a big model is split. */
+const many = (list, label) => (list.length === 1 && !list[0].title ? mmd(list[0].code) : `_Split into ${list.length} diagrams so each stays readable._\n\n${list.map((d) => `#### ${label}: ${d.title}\n${mmd(d.code)}${d.note ? `\n\n_${d.note}_` : ''}`).join('\n\n')}`);
 const money = (p, n) => `${p.businessCase.currency || ''} ${Math.round(n).toLocaleString()}`.trim();
 const reqsOf = (p, types) => p.requirements.filter((r) => types.includes(r.type) && r.status !== 'Rejected');
 const sh = (p, id) => nameOf(p.stakeholders, id);
@@ -111,7 +113,7 @@ const DOCS = {
     `## 3. Functional requirements\n${reqsOf(p, ['Functional']).map((r) => `### ${r.code} ${r.title}\n${r.statement}\n\n- **Priority:** ${r.priority} · **Status:** ${r.status} · **Source:** ${sh(p, r.source) || '—'}\n${r.rationale ? `- **Rationale:** ${r.rationale}\n` : ''}\n**Acceptance criteria**\n${acceptance(r)}`).join('\n\n') || '_None._'}`,
     `## 4. Use cases\n${mmd(D.useCaseDiagram(p))}\n\n${table(['ID', 'Use case', 'Primary actor'], p.usecases.map((u) => [u.code, u.name, nameOf(p.personas, u.primary)]))}\n\nSee the Use Case Specification for full flows.`,
     `## 5. Non-functional requirements\n${table(['ID', 'Category', 'Requirement', 'Metric / target', 'Priority'], reqsOf(p, ['Non-functional']).map((r) => [r.code, r.category, r.statement, r.metric, r.priority]))}`,
-    `## 6. Data requirements\n${reqTable(p, reqsOf(p, ['Data']))}\n\n${mmd(D.erd(p))}`,
+    `## 6. Data requirements\n${reqTable(p, reqsOf(p, ['Data']))}\n\n${many(D.modelDocDiagrams(p, 'erd'), 'Data model')}`,
     `## 7. External interface requirements\n${reqTable(p, reqsOf(p, ['Interface']))}\n\n${table(['System', 'Direction', 'Protocol', 'Data', 'Frequency'], p.integrations.map((i) => [i.system, i.direction, i.protocol, i.data, i.frequency]))}`,
     `## 8. Business rules and decision logic\n${table(['ID', 'Rule', 'Requirements'], p.rules.map((r) => [r.code, `${r.name}: ${r.statement}`, codesOf(p.requirements, r.requirementIds)]))}\n\n${p.decisionTables.map(dtMarkdown).join('\n\n')}`,
     `## 9. State models\n${p.states.map((s) => `### ${s.name}\n${mmd(D.stateDiagram(p, s))}`).join('\n\n') || '_None._'}`,
@@ -149,8 +151,8 @@ const DOCS = {
 
   data: { title: 'Data Dictionary & Data Model', audience: 'Developers, data team', build: (p) => [
     header(p, 'Data Dictionary & Data Model', 'Defines the logical data model: entities, attributes, keys, relationships and data governance.'),
-    `## 2. Entity relationship diagram\n${mmd(D.erd(p))}`,
-    `## 3. Class diagram\n${mmd(D.classDiagram(p))}`,
+    `## 2. Entity relationship diagram\n${many(D.modelDocDiagrams(p, 'erd'), 'Area')}`,
+    `## 3. Class diagram\n${many(D.modelDocDiagrams(p, 'class'), 'Area')}`,
     `## 4. Entities\n${table(['Entity', 'Description', 'Classification', 'Retention', 'Owner'], p.entities.map((e) => [e.name, e.description, e.classification, e.retention, sh(p, e.owner)]))}`,
     ...p.entities.map((e) => `### ${e.name}\n${table(['Attribute', 'Type', 'Key', 'Required', 'Unique', 'Description / validation'], (e.fields || []).map((f) => [f.name, f.type, [f.pk && 'PK', f.fk && `FK → ${f.fk}`].filter(Boolean).join(', '), f.required ? 'Yes' : 'No', f.unique ? 'Yes' : 'No', f.desc]))}`),
     `## 5. Relationships\n${table(['From', 'Cardinality', 'To', 'Meaning'], p.relationships.map((r) => [nameOf(p.entities, r.from), r.card, nameOf(p.entities, r.to), r.label]))}`,
@@ -173,7 +175,7 @@ const DOCS = {
       header(p, 'Requirements Traceability Matrix', 'Traces every requirement backwards to objectives and sources, and forwards to design, stories and tests.'),
       `## 2. Coverage\n- Requirements: **${rows.length}**\n- Covered by at least one test: **${cov}** (${rows.length ? Math.round((cov / rows.length) * 100) : 0}%)\n- Without an objective: **${rows.filter((x) => !x.objectives.length && x.r.type !== 'Business').length}**`,
       `## 3. Matrix\n${table(['Req', 'Title', 'Priority', 'Objectives', 'Derived from', 'Use cases', 'Stories', 'Rules', 'APIs', 'Tests'], rows.map((x) => [x.r.code, x.r.title, x.r.priority, x.objectives.join(', '), x.parents.join(', '), x.usecases.join(', '), x.stories.join(', '), x.rules.join(', '), x.apis.join(', '), x.tests.join(', ')]))}`,
-      `## 4. Traceability graph\n${mmd(D.traceGraph(p))}`,
+      `## 4. Traceability graph\n${many(D.traceDocDiagrams(p), 'Objective')}`,
       `## 5. Requirement quality issues\n${table(['Req', 'Issues'], p.requirements.map((r) => [r.code, lintRequirement(r, p).join('; ')]).filter((x) => x[1]))}`,
     ];
   } },

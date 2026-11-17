@@ -24,8 +24,8 @@
 <table><thead><tr><th>Group</th><th>Diagram</th><th>Result</th><th class="num">Source</th><th class="num">ms</th></tr></thead><tbody id="rows"></tbody></table>
 <div id="stage"></div>
 <script type="module">
-  import { render } from '../js/mermaid.js';
-  import { allDiagrams } from '../js/gen/diagrams.js';
+  import { render, canTidy, sized } from '../js/mermaid.js';
+  import { allDiagrams, focusGraph, FOCUS_TYPES, modelDocDiagrams, traceDocDiagrams } from '../js/gen/diagrams.js';
   import { sampleProject } from '../js/sample.js';
   import { blankProject } from '../js/model.js';
   import { bigProject } from './big-project.js';
@@ -35,11 +35,11 @@
   const sum = document.getElementById('sum');
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const results = [];
-  async function check(group, title, code, light = false) {
+  async function check(group, title, code, light = false, tidy = false, page = false) {
     const t0 = performance.now();
     let ok = true, msg = '';
     try {
-      const svg = await render(code, { light });
+      const svg = await render(code, { light, tidy });
       if (!/<svg[\s>]/.test(svg)) throw new Error('No SVG produced');
       if (/Syntax error in text/i.test(svg)) throw new Error('Mermaid syntax error');
       // put it in the page so layout really happens, then measure
@@ -47,6 +47,12 @@
       stage.innerHTML = svg;
       const box = stage.querySelector('svg').getBoundingClientRect();
       if (!(box.width > 10 && box.height > 10)) throw new Error(`Empty drawing (${Math.round(box.width)}×${Math.round(box.height)})`);
+      if (page) {
+        // document diagrams must fit a printed page without shrinking text below ~60%
+        const { w, h } = sized(svg);
+        const fitPortrait = Math.min(1, 643 / w, 900 / h), fitLandscape = Math.min(1, 1015 / w, 660 / h);
+        if (Math.max(fitPortrait, fitLandscape) < 0.6) throw new Error(`Too big for a page: ${Math.round(w)}×${Math.round(h)} would print at ${Math.round(Math.max(fitPortrait, fitLandscape) * 100)}%`);
+      }
       stage.innerHTML = '';
     } catch (e) { ok = false; msg = e.message || String(e); }
     const ms = Math.round(performance.now() - t0);
@@ -62,6 +68,16 @@
   for (const d of allDiagrams(bigProject(3)).filter((x) => !x.def?.per)) await check('Stress x3', d.title, d.code);
   for (const d of allDiagrams(sampleProject())) await check('Sample (print theme)', d.title, d.code, true);
   for (const [name, code] of Object.entries(TEMPLATES)) await check('Studio templates', name, code);
+  // diagrams exactly as documents embed them (print theme, split into page-sized parts)
+  for (const [name, p] of [['Sample', sampleProject()], ['Stress x1', bigProject(1)]]) {
+    for (const [kind, list] of [['ERD', modelDocDiagrams(p, 'erd')], ['Class', modelDocDiagrams(p, 'class')], ['Trace', traceDocDiagrams(p)]]) for (const d of list) await check(`Document parts (${name})`, `${kind} ${d.title}`, d.code, true, false, true);
+  }
+  // optional tidy (ELK) layout on every diagram that can use it
+  for (const d of allDiagrams(sampleProject()).filter((x) => canTidy(x.code))) await check('Sample (tidy layout)', d.title, d.code, false, true);
+  // focus view: one item of every kind, sample and stress project
+  const sp = sampleProject(), bp = bigProject(1);
+  for (const [name, p] of [['Sample', sp], ['Stress x1', bp]]) for (const k of Object.keys(FOCUS_TYPES)) if (p[k].length) await check(`Focus (${name})`, `${FOCUS_TYPES[k].label} ${k === 'objectives' ? '(3 links away)' : ''}`, focusGraph(p, k, p[k][0].id, k === 'objectives' ? 3 : 2));
+  await check('Focus (Stress x1, tidy)', 'Objective, 3 links away', focusGraph(bp, 'objectives', bp.objectives[0].id, 3), false, true);
 
   const bad = results.filter((r) => !r.ok);
   const slow = results.reduce((a, r) => (r.ms > a.ms ? r : a), { ms: 0 });

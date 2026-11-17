@@ -231,5 +231,50 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('sql has create table', /CREATE TABLE/i.test(sqlDdl(s)));
 }
 
+// ---------- splitting big diagrams and the focus view ----------
+{
+  const { traceParts, modelAreas, modelDocDiagrams, traceDocDiagrams, focusGraph, linkGraph, LIMITS, erd, classDiagram } = await import('../js/gen/diagrams.js');
+  const { bigProject } = await import('./big-project.js');
+  const big = bigProject(1);
+  const parts = traceParts(big);
+  const live = big.requirements.filter((r) => r.status !== 'Rejected');
+  // every live requirement appears in at least one part, and no part is too big
+  const shown = new Set(parts.flatMap((x) => [...x.code.matchAll(/R_(\w+)\[/g)].map((m) => m[1])));
+  t('trace parts cover every requirement', live.every((r) => shown.has(r.id.replace(/[^A-Za-z0-9]/g, '_'))), `${shown.size} of ${live.length}`);
+  t('trace parts are small', parts.every((x) => (x.code.match(/:::req/g) || []).length <= LIMITS.partReqs));
+  const areas = modelAreas(big);
+  eq('areas cover every entity once', areas.flatMap((a) => a.list).length, big.entities.length);
+  t('areas are small', areas.every((a) => a.list.length <= LIMITS.partEntities));
+  eq('every entity is in exactly one area', new Set(areas.flatMap((a) => a.list.map((e) => e.id))).size, big.entities.length);
+  const docErd = modelDocDiagrams(big, 'erd');
+  const ident = (n) => n.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1');
+  t('document ERD splits into page-sized parts', docErd.length > 1 && docErd.every((d) => (d.code.match(/^\s{2}\w+ \{$/gm) || []).length <= LIMITS.docEntities * 3));
+  t('document ERD draws every entity with its keys', big.entities.every((e) => docErd.some((d) => new RegExp(`^  ${ident(e.name)} \\{\\n(?!    string other_area)`, 'm').test(d.code))));
+  const docTrace = traceDocDiagrams(big);
+  t('document trace parts are page-sized', docTrace.every((d) => (d.code.match(/:::(req|pass|fail)/g) || []).length <= LIMITS.docReqs));
+  t('document trace draws every requirement', live.every((r) => docTrace.some((d) => d.code.includes(`R_${r.id.replace(/[^A-Za-z0-9]/g, '_')}[`))));
+  const s = sampleProject();
+  eq('sample ERD stays one diagram', modelDocDiagrams(s, 'erd').length, 1);
+  eq('sample trace stays one diagram', traceDocDiagrams(s).length, 1);
+  // explicit areas win over automatic grouping
+  const s2 = sampleProject();
+  s2.entities.forEach((e, i) => (e.area = i % 2 ? 'Lending' : 'Customer'));
+  eq('area field groups entities', modelAreas(s2).map((a) => a.name).sort(), ['Customer', 'Lending']);
+  const lending = modelAreas(s2).find((a) => a.name === 'Lending').list;
+  t('screen ERD by area shows linked entities from other areas as stubs', /other_area/.test(erd(s2, lending)));
+  t('screen class diagram by area marks stubs with a valid annotation', /<<Customer>>/.test(classDiagram(s2, lending)));
+  const bigDoc = modelDocDiagrams(big, 'erd');
+  t('document parts list cross-part links in words instead of drawing stubs', bigDoc.some((d) => /Links to other parts: .+→/.test(d.note)) && bigDoc.every((d) => !/other_area/.test(d.code)));
+  // focus view
+  const r = s.requirements.find((x) => x.code === 'FR-001');
+  const f1 = focusGraph(s, 'requirements', r.id, 1);
+  t('focus marks the chosen item', /:::focus/.test(f1));
+  t('focus depth 1 includes its objective', s.objectives.filter((o) => (r.objectiveIds || []).includes(o.id)).every((o) => f1.includes(`O_${o.id}[`)));
+  t('focus depth 2 is a superset of depth 1', (focusGraph(s, 'requirements', r.id, 2).match(/\[/g) || []).length >= (f1.match(/\[/g) || []).length);
+  t('focus is capped on huge projects', (focusGraph(big, 'objectives', big.objectives[0].id, 4).match(/:::(?!note)\w+/g) || []).length <= LIMITS.focusNodes + 1);
+  t('focus handles a missing item', /Pick an item/.test(focusGraph(s, 'requirements', 'nope', 2)));
+  t('link graph has no dangling ends', linkGraph(big).every(([ka, a, kb, b]) => big[ka].some((x) => x.id === a) && big[kb].some((x) => x.id === b)));
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -3,6 +3,7 @@ import { COLLECTIONS, uid, ensureCode, lintRequirement } from '../model.js';
 import { project, update } from '../store.js';
 import { esc, $, $$, modal, toast, confirmBox, renderForm, wireForm, readForm, download, fileSafe } from '../ui.js';
 import { toCsv } from '../gen/exports.js';
+import { FOCUS_TYPES } from '../gen/diagrams.js';
 
 const filterState = {};
 
@@ -67,7 +68,7 @@ export function openItem(key, id, preset = {}) {
     title: `${existing ? 'Edit' : 'New'} ${c.singular}${item.code ? ` · ${item.code}` : ''}`,
     body,
     wide: c.fields.some((f) => f.type === 'rows'),
-    footer: `${existing ? '<button class="btn danger" data-del>Delete</button><button class="btn" data-dup>Duplicate</button>' : ''}<span class="grow"></span><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save>Save</button>`,
+    footer: `${existing ? '<button class="btn danger" data-del>Delete</button><button class="btn" data-dup>Duplicate</button>' : ''}${existing && FOCUS_TYPES[key] ? `<a class="btn" data-links href="#/diagrams/${encodeURIComponent(`focus:${key}:${id}`)}" title="Diagram of everything linked to this ${esc(c.singular)}">Show links</a>` : ''}<span class="grow"></span><button class="btn" data-cancel>Cancel</button><button class="btn primary" data-save>Save</button>`,
   });
   const form = $('form', body);
   wireForm(form, c.fields, item, p);
@@ -101,6 +102,7 @@ export function openItem(key, id, preset = {}) {
   $('[data-save]', m.el).onclick = save;
   form.addEventListener('submit', (e) => (e.preventDefault(), save()));
   $('[data-cancel]', m.el).onclick = m.close;
+  $('[data-links]', m.el)?.addEventListener('click', () => m.close());
   $('[data-dup]', m.el)?.addEventListener('click', () => {
     const copy = { ...JSON.parse(JSON.stringify(existing)), id: uid(key.slice(0, 3)), code: '' };
     if (copy.name) copy.name += ' (copy)';

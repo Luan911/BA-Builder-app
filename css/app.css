@@ -168,6 +168,8 @@ a.stat:hover { border-color: var(--green); }
 
 /* diagrams */
 .stage { background: #000; min-height: 420px; max-height: 76vh; overflow: auto; padding: 20px; background-image: radial-gradient(circle at 1px 1px, #1c1c1c 1px, transparent 0); background-size: 20px 20px; }
+.stage .hit > rect, .stage .hit > polygon, .stage .hit > path, .stage .hit > circle, .stage .hit .basic { stroke: #facc15 !important; stroke-width: 4px !important; }
+.stage svg { display: block; margin: 0 auto; }
 .stage svg { max-width: none; height: auto; display: block; margin: 0 auto; }
 .stage .err { color: var(--red-2); font-family: var(--mono); white-space: pre-wrap; font-size: 12.5px; }
 .studio { display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 16px; }

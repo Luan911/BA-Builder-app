@@ -1,5 +1,10 @@
 // Mermaid loader + SVG/PNG export helpers. The library loads on first use.
 const URL_MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+// Optional "tidy" layout engine (ELK, MIT licence): square-cornered lines and fewer crossings on big flowcharts.
+const URL_ELK = 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+let elkReady = null;
+// Diagrams this big are always drawn with the standard engine: ELK can freeze the page on huge graphs.
+const ELK_MAX_LINES = 600;
 let ready = null;
 let seq = 0;
 let current = '';
@@ -35,9 +40,19 @@ function lib(mode) {
   });
 }
 
-/** Render Mermaid source to an SVG string. `light: true` for documents exported to white pages. */
-export async function render(code, { light = false } = {}) {
+/** Can this diagram use the tidy (ELK) layout? Flowcharts and state diagrams of a sensible size. */
+export const canTidy = (code) => /^\s*(flowchart|graph|stateDiagram)/.test(code) && code.split('\n').length <= ELK_MAX_LINES;
+
+/** Render Mermaid source to an SVG string. `light: true` for documents exported to white pages; `tidy: true` uses ELK. */
+export async function render(code, { light = false, tidy = false } = {}) {
   const mm = await lib(light ? 'light' : 'dark');
+  if (tidy && canTidy(code)) {
+    try {
+      elkReady ||= import(URL_ELK).then((m) => mm.registerLayoutLoaders(m.default));
+      await elkReady;
+      code = `%%{init: {"layout": "elk"}}%%\n${code}`;
+    } catch { elkReady = null; } // offline or blocked: fall back to the standard layout
+  }
   const elId = `mmd${Date.now().toString(36)}${seq++}`;
   try {
     const { svg } = await mm.render(elId, code);

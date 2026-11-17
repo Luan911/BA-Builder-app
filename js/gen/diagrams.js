@@ -5,11 +5,12 @@ import { estimate, daysBetween } from '../estimate.js';
 const q = (s) => `"${String(s ?? '').replace(/["“”]/g, "'").replace(/[\r\n]+/g, ' ').replace(/[<>{}[\]|#;]/g, ' ').trim() || ' '}"`;
 const id = (pre, s) => `${pre}_${String(s ?? '').replace(/[^A-Za-z0-9]/g, '_') || 'x'}`;
 const word = (s) => String(s ?? '').replace(/[^A-Za-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim() || 'Item';
+export { id as nodeId };
 const ident = (s) => String(s ?? '').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1') || 'Unnamed';
 
 // Above these sizes diagrams switch to a condensed view: Mermaid's layout time grows
 // much faster than the number of boxes, and a 60-second freeze helps nobody.
-export const LIMITS = { traceNodes: 150, traceSummaryReqs: 80, modelEntities: 25, erdMax: 70, classMax: 40 };
+export const LIMITS = { traceNodes: 150, traceSummaryReqs: 80, modelEntities: 25, erdMax: 70, classMax: 40, partReqs: 40, partEntities: 20, focusNodes: 120, docReqs: 8, docEntities: 5 };
 
 /** For very big data models: keep the most-connected entities. Returns { list, hidden }. */
 function topEntities(p, max) {
@@ -113,14 +114,16 @@ export function sequenceDiagram(p, uc) {
 
 // ---------- ERD ----------
 const CARD = { 'one-to-one': '||--||', 'one-to-many': '||--o{', 'many-to-many': '}o--o{', 'zero-or-one-to-many': '|o--o{' };
-export function erd(p) {
+export function erd(p, only = null, { compact: keysOnly = false, stubs = true } = {}) {
   const L = ['erDiagram'];
-  const compact = p.entities.length > LIMITS.modelEntities;
-  const { list: ents, hidden } = topEntities(p, LIMITS.erdMax);
+  const compact = keysOnly || (!only && p.entities.length > LIMITS.modelEntities);
+  const { list: ents, hidden } = only ? { list: stubs ? withNeighbours(p, only) : only, hidden: 0 } : topEntities(p, LIMITS.erdMax);
+  const isStub = (e) => only && !only.includes(e);
   if (hidden) L.push(`  MORE_ENTITIES_NOT_SHOWN { string hidden_${hidden}_entities "see the data dictionary" }`);
   for (const e of ents) {
     L.push(`  ${ident(e.name)} {`);
     const fields = (e.fields || []).filter((f) => f.name);
+    if (isStub(e)) { L.push(`    string other_area "${word(e.area || 'other part of the model')}"`, '  }'); continue; }
     const shown = compact ? fields.filter((f) => f.pk || f.fk || f.unique) : fields;
     if (compact && shown.length < fields.length) L.push(`    string more_${fields.length - shown.length}_fields`);
     for (const f of shown) {
@@ -136,7 +139,7 @@ export function erd(p) {
     pairs.add(`${a.name}>${b.name}`);
     L.push(`  ${ident(a.name)} ${CARD[r.card] || '||--o{'} ${ident(b.name)} : ${q(r.label || 'relates to')}`);
   }
-  for (const e of ents) for (const f of e.fields || []) {
+  for (const e of ents) for (const f of isStub(e) ? [] : e.fields || []) {
     if (f.fk && ents.some((x) => x.name === f.fk) && !pairs.has(`${f.fk}>${e.name}`)) {
       pairs.add(`${f.fk}>${e.name}`);
       L.push(`  ${ident(f.fk)} ||--o{ ${ident(e.name)} : ${q(f.name)}`);
@@ -147,12 +150,13 @@ export function erd(p) {
 }
 
 // ---------- Class diagram ----------
-export function classDiagram(p) {
+export function classDiagram(p, only = null, { compact: keysOnly = false, stubs = true } = {}) {
   const L = ['classDiagram'];
-  const compact = p.entities.length > LIMITS.modelEntities;
-  const { list: ents, hidden } = topEntities(p, LIMITS.classMax);
+  const compact = keysOnly || (!only && p.entities.length > LIMITS.modelEntities);
+  const { list: ents, hidden } = only ? { list: stubs ? withNeighbours(p, only) : only, hidden: 0 } : topEntities(p, LIMITS.classMax);
   if (hidden) L.push(`  class More_${hidden}_entities_not_shown`, `  note for More_${hidden}_entities_not_shown "Showing the ${ents.length} most-connected entities. The data dictionary lists all of them."`);
   for (const e of ents) {
+    if (only && !only.includes(e)) { L.push(`  class ${ident(e.name)}`, `  <<${ident(e.area || 'other_area')}>> ${ident(e.name)}`); continue; }
     L.push(`  class ${ident(e.name)} {`);
     const fields = (e.fields || []).filter((f) => f.name);
     const shown = compact ? fields.filter((f) => f.pk || f.fk) : fields;
@@ -284,9 +288,9 @@ export function mindmap(p) {
 }
 
 // ---------- Traceability graph ----------
-export function traceGraph(p) {
+export function traceGraph(p, { full = false } = {}) {
   const total = p.objectives.length + p.requirements.length + p.stories.length + p.tests.length;
-  if (total > LIMITS.traceNodes) return traceSummary(p);
+  if (!full && total > LIMITS.traceNodes) return traceSummary(p);
   const L = ['flowchart LR'];
   p.objectives.forEach((o) => L.push(`  ${id('O', o.id)}[${q(`${o.code} ${o.title}`)}]:::obj`));
   p.requirements.forEach((r) => L.push(`  ${id('R', r.id)}[${q(`${r.code} ${r.title}`)}]:::req`));
@@ -329,6 +333,211 @@ function traceSummary(p) {
   return L.join('\n');
 }
 
+// ---------- Splitting big models into readable parts ----------
+const chunk = (list, n) => Array.from({ length: Math.ceil(list.length / n) }, (_, i) => list.slice(i * n, i * n + n));
+
+/** One trace graph per objective (split into parts if an objective has many requirements), plus unlinked ones. */
+export function traceParts(p, { size = LIMITS.partReqs, summary = false } = {}) {
+  const live = p.requirements.filter((r) => r.status !== 'Rejected');
+  const groups = p.objectives.map((o) => [`${o.code} ${o.title}`, [o], live.filter((r) => (r.objectiveIds || []).includes(o.id))]);
+  const unlinked = live.filter((r) => !(r.objectiveIds || []).some((x) => byId(p.objectives, x)));
+  if (unlinked.length) groups.push(['Not linked to an objective', [], unlinked]);
+  const out = [];
+  for (const [name, objs, reqs] of groups) {
+    if (!reqs.length) continue;
+    const parts = chunk(reqs, size);
+    parts.forEach((part, i) => {
+      const title = `${name}${parts.length > 1 ? ` (part ${i + 1} of ${parts.length})` : ''}`;
+      if (summary) return out.push({ title, code: traceCompact(p, objs, part) });
+      const ids = new Set(part.map((r) => r.id));
+      const stories = p.stories.filter((s) => (s.requirementIds || []).some((r) => ids.has(r)));
+      const sids = new Set(stories.map((s) => s.id));
+      const tests = p.tests.filter((t) => (t.requirementIds || []).some((r) => ids.has(r)) || (t.storyIds || []).some((s) => sids.has(s)));
+      const sub = { ...p, objectives: objs, requirements: part, stories, tests };
+      out.push({ title, code: traceGraph(sub, { full: true }) });
+    });
+  }
+  return out;
+}
+
+/** Page-sized trace diagram: objective → requirements, each box showing its story and test counts. */
+function traceCompact(p, objs, reqs) {
+  // tight spacing and wide labels so a part fits one printed page
+  const L = ['%%{init: {"flowchart": {"wrappingWidth": 480, "nodeSpacing": 14, "rankSpacing": 60}}}%%', 'flowchart LR'];
+  objs.forEach((o) => L.push(`  ${id('O', o.id)}[${q(`${o.code} ${o.title}`.slice(0, 60))}]:::obj`));
+  if (!objs.length) L.push(`  NONE[${q('No objective')}]:::obj`);
+  for (const r of reqs) {
+    const st = p.stories.filter((s) => (s.requirementIds || []).includes(r.id)).length;
+    const tests = p.tests.filter((t) => (t.requirementIds || []).includes(r.id));
+    const passed = tests.filter((t) => t.status === 'Passed').length;
+    const cls = !tests.length ? 'req' : tests.some((t) => t.status === 'Failed') ? 'fail' : passed === tests.length ? 'pass' : 'req';
+    L.push(`  ${id('R', r.id)}[${q(`${r.code} ${r.title}`.slice(0, 55) + ` · ${st} stories · ${passed}/${tests.length} tests passed`)}]:::${cls}`);
+    L.push(`  ${objs.length ? id('O', objs[0].id) : 'NONE'} --> ${id('R', r.id)}`);
+  }
+  L.push('  classDef obj fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef req fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef pass fill:#22c55e,stroke:#15803d,color:#000000', '  classDef fail fill:#ef4444,stroke:#b91c1c,color:#000000');
+  return L.join('\n');
+}
+
+/** Entities that are linked by a relationship or foreign key. */
+function entityLinks(p) {
+  const byName = new Map(p.entities.map((e) => [e.name, e]));
+  const links = [];
+  for (const r of p.relationships) { const a = byId(p.entities, r.from), b = byId(p.entities, r.to); if (a && b && a !== b) links.push([a, b]); }
+  for (const e of p.entities) for (const f of e.fields || []) { const t = f.fk && byName.get(f.fk); if (t && t !== e) links.push([t, e]); }
+  return links;
+}
+function withNeighbours(p, only) {
+  const set = new Set(only);
+  for (const [a, b] of entityLinks(p)) { if (set.has(a)) set.add(b); if (set.has(b)) set.add(a); }
+  return p.entities.filter((e) => set.has(e)); // keeps the original order
+}
+
+/**
+ * Group entities into readable areas: by the "Area" field when it is used, otherwise by
+ * which entities are linked to each other. Big groups are split, keeping linked entities together.
+ */
+export function modelAreas(p, size = LIMITS.partEntities) {
+  const ents = p.entities;
+  let groups;
+  if (ents.some((e) => (e.area || '').trim())) {
+    const m = new Map();
+    for (const e of ents) { const k = (e.area || '').trim() || 'Other'; if (!m.has(k)) m.set(k, []); m.get(k).push(e); }
+    groups = [...m].map(([name, list]) => ({ name, list }));
+  } else {
+    const parent = new Map(ents.map((e) => [e, e]));
+    const find = (e) => (parent.get(e) === e ? e : (parent.set(e, find(parent.get(e))), parent.get(e)));
+    for (const [a, b] of entityLinks(p)) parent.set(find(a), find(b));
+    const m = new Map();
+    for (const e of ents) { const r = find(e); if (!m.has(r)) m.set(r, []); m.get(r).push(e); }
+    const comps = [...m.values()];
+    const singles = comps.filter((c) => c.length === 1).flat();
+    groups = comps.filter((c) => c.length > 1).sort((a, b) => b.length - a.length).map((list) => ({ name: list[0].name, list }));
+    if (singles.length) groups.push({ name: 'Unlinked entities', list: singles });
+  }
+  // split big groups in breadth-first order so neighbours stay on the same diagram
+  const links = entityLinks(p);
+  const out = [];
+  for (const g of groups) {
+    if (g.list.length <= size) { out.push(g); continue; }
+    const inG = new Set(g.list), seen = new Set(), order = [];
+    for (const start of g.list) {
+      if (seen.has(start)) continue;
+      const queue = [start]; seen.add(start);
+      while (queue.length) {
+        const e = queue.shift(); order.push(e);
+        for (const [a, b] of links) for (const [x, y] of [[a, b], [b, a]]) if (x === e && inG.has(y) && !seen.has(y)) (seen.add(y), queue.push(y));
+      }
+    }
+    const parts = chunk(order, size);
+    parts.forEach((list, i) => out.push({ name: `${g.name} (part ${i + 1} of ${parts.length})`, list }));
+  }
+  return out;
+}
+
+/**
+ * Diagrams for documents, sized to fit a printed page: the whole model when it is small;
+ * otherwise page-sized parts (key fields only; the data dictionary table lists every field).
+ */
+export function modelDocDiagrams(p, kind) {
+  const build = kind === 'class' ? classDiagram : erd;
+  if (p.entities.length <= LIMITS.docEntities * 2 && p.entities.reduce((a, e) => a + (e.fields || []).length, 0) <= 60) return [{ title: '', code: build(p) }];
+  const areas = modelAreas(p, LIMITS.docEntities);
+  const areaOf = new Map(areas.flatMap((a) => a.list.map((e) => [e, a.name])));
+  const links = entityLinks(p);
+  // links that leave a part are listed under it in words instead of drawn as extra boxes
+  return areas.map((a) => {
+    const inA = new Set(a.list);
+    const out = [...new Set(links.filter(([x, y]) => inA.has(x) !== inA.has(y)).map(([x, y]) => (inA.has(x) ? `${x.name} → ${y.name} (${areaOf.get(y)})` : `${x.name} (${areaOf.get(x)}) → ${y.name}`)))];
+    return { title: a.name, code: build(p, a.list, { compact: true, stubs: false }), note: out.length ? `Links to other parts: ${out.join('; ')}.` : '' };
+  });
+}
+export function traceDocDiagrams(p) {
+  const total = p.objectives.length + p.requirements.length + p.stories.length + p.tests.length;
+  return total <= 60 ? [{ title: '', code: traceGraph(p) }] : traceParts(p, { size: LIMITS.docReqs, summary: true });
+}
+
+// ---------- Focus view: one item and everything linked to it ----------
+export const FOCUS_TYPES = {
+  objectives: { pre: 'O', label: 'Objective', cls: 'obj', name: (x) => `${x.code} ${x.title}` },
+  requirements: { pre: 'R', label: 'Requirement', cls: 'req', name: (x) => `${x.code} ${x.title}` },
+  stories: { pre: 'U', label: 'User story', cls: 'story', name: (x) => `${x.code} ${x.iWant || ''}` },
+  tests: { pre: 'T', label: 'Test case', cls: 'test', name: (x) => `${x.code} ${x.title} (${x.status || 'Not run'})` },
+  usecases: { pre: 'C', label: 'Use case', cls: 'uc', name: (x) => `${x.code} ${x.name}` },
+  personas: { pre: 'P', label: 'User / actor', cls: 'person', name: (x) => x.name },
+  rules: { pre: 'B', label: 'Business rule', cls: 'rule', name: (x) => `${x.code} ${x.name}` },
+  gaps: { pre: 'G', label: 'Gap', cls: 'rule', name: (x) => `${x.code || ''} ${x.area || x.gap || 'Gap'}` },
+  apis: { pre: 'A', label: 'API endpoint', cls: 'api', name: (x) => `${x.method} ${x.path}` },
+  changes: { pre: 'X', label: 'Change request', cls: 'change', name: (x) => `${x.code} ${x.title}` },
+  workItems: { pre: 'W', label: 'Work item', cls: 'work', name: (x) => `${x.code} ${x.item}` },
+  entities: { pre: 'E', label: 'Data entity', cls: 'entity', name: (x) => x.name },
+  states: { pre: 'M', label: 'State machine', cls: 'entity', name: (x) => x.name },
+};
+
+/** Every link in the project, as [collectionA, idA, collectionB, idB, label]. */
+export function linkGraph(p) {
+  const L = [];
+  const add = (ka, a, kb, b, label = '') => { if (a && b && byId(p[ka], a) && byId(p[kb], b)) L.push([ka, a, kb, b, label]); };
+  for (const r of p.requirements) {
+    (r.objectiveIds || []).forEach((o) => add('objectives', o, 'requirements', r.id, 'supports'));
+    (r.parentIds || []).forEach((x) => add('requirements', x, 'requirements', r.id, 'derives'));
+  }
+  for (const s of p.stories) { (s.requirementIds || []).forEach((r) => add('requirements', r, 'stories', s.id, 'implements')); add('personas', s.asA, 'stories', s.id, 'wants'); }
+  for (const t of p.tests) { (t.requirementIds || []).forEach((r) => add('requirements', r, 'tests', t.id, 'tested by')); (t.storyIds || []).forEach((s) => add('stories', s, 'tests', t.id, 'tested by')); }
+  for (const u of p.usecases) { (u.requirementIds || []).forEach((r) => add('requirements', r, 'usecases', u.id, 'realised by')); add('personas', u.primary, 'usecases', u.id, 'primary'); (u.secondary || []).forEach((x) => add('personas', x, 'usecases', u.id, 'supports')); }
+  for (const k of ['rules', 'gaps', 'apis', 'changes', 'workItems']) for (const x of p[k]) (x.requirementIds || []).forEach((r) => add('requirements', r, k, x.id));
+  const ent = new Map(p.entities.map((e) => [e.name, e.id]));
+  for (const r of p.relationships) add('entities', r.from, 'entities', r.to, r.label || '');
+  for (const e of p.entities) for (const f of e.fields || []) if (f.fk && ent.get(f.fk)) add('entities', ent.get(f.fk), 'entities', e.id, f.name);
+  for (const a of p.apis) for (const n of [a.request, a.response]) if (ent.get(n)) add('apis', a.id, 'entities', ent.get(n), 'uses');
+  for (const s of p.states) add('entities', s.entity, 'states', s.id, 'lifecycle');
+  return L;
+}
+
+/** Mermaid for the neighbourhood of one item, up to `depth` links away (nearest first, capped). */
+export function focusGraph(p, coll, itemId, depth = 2) {
+  const start = `${coll}:${itemId}`;
+  if (!FOCUS_TYPES[coll] || !byId(p[coll], itemId)) return `flowchart LR
+  A[${q('Pick an item to see everything linked to it')}]`;
+  const adj = new Map();
+  const links = linkGraph(p);
+  for (const [ka, a, kb, b, label] of links) {
+    const x = `${ka}:${a}`, y = `${kb}:${b}`;
+    if (!adj.has(x)) adj.set(x, []);
+    if (!adj.has(y)) adj.set(y, []);
+    adj.get(x).push([y, label]); adj.get(y).push([x, label]);
+  }
+  const dist = new Map([[start, 0]]);
+  const queue = [start];
+  let truncated = 0;
+  while (queue.length) {
+    const n = queue.shift();
+    if (dist.get(n) >= depth) continue;
+    for (const [m] of adj.get(n) || []) {
+      if (dist.has(m)) continue;
+      if (dist.size >= LIMITS.focusNodes) { truncated++; continue; }
+      dist.set(m, dist.get(n) + 1);
+      queue.push(m);
+    }
+  }
+  const L = ['flowchart LR'];
+  for (const n of dist.keys()) {
+    const [k, i] = n.split(':');
+    const T = FOCUS_TYPES[k];
+    const x = byId(p[k], i);
+    L.push(`  ${id(T.pre, i)}[${q(`${T.label}: ${T.name(x)}`.slice(0, 80))}]:::${n === start ? 'focus' : T.cls}`);
+  }
+  const drawn = new Set();
+  for (const [ka, a, kb, b, label] of links) {
+    const x = `${ka}:${a}`, y = `${kb}:${b}`;
+    if (!dist.has(x) || !dist.has(y) || drawn.has(`${x}>${y}`)) continue;
+    drawn.add(`${x}>${y}`);
+    L.push(`  ${id(FOCUS_TYPES[ka].pre, a)} -->${label ? `|${word(label)}|` : ''} ${id(FOCUS_TYPES[kb].pre, b)}`);
+  }
+  if (truncated) L.push(`  MORE[${q(`${truncated} more links not shown, reduce the depth or focus on a linked item`)}]:::note`);
+  L.push('  classDef focus fill:#22c55e,stroke:#4ade80,stroke-width:3px,color:#000000', '  classDef obj fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef req fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef story fill:#111111,stroke:#4ade80,color:#f2f2f2', '  classDef test fill:#111111,stroke:#8c8c8c,color:#f2f2f2', '  classDef uc fill:#0d2416,stroke:#4ade80,color:#f2f2f2', '  classDef person fill:#1a0b0b,stroke:#f87171,color:#f2f2f2', '  classDef rule fill:#141414,stroke:#ef4444,color:#f2f2f2', '  classDef api fill:#0a0a0a,stroke:#22c55e,stroke-dasharray:4 3,color:#f2f2f2', '  classDef change fill:#2a0e0e,stroke:#f87171,color:#f2f2f2', '  classDef work fill:#111111,stroke:#383838,color:#f2f2f2', '  classDef entity fill:#0a0a0a,stroke:#4ade80,color:#f2f2f2', '  classDef note fill:#141414,stroke:#383838,color:#8c8c8c');
+  return L.join('\n');
+}
+
 // ---------- Decision table → decision tree ----------
 export function decisionFlow(p, dt) {
   const L = ['flowchart TD'];
@@ -355,9 +564,11 @@ export const DIAGRAMS = [
   { id: 'state', title: 'State machine', group: 'Behaviour', per: 'states', build: (p, x) => stateDiagram(p, x), edit: '#/c/states' },
   { id: 'erd', title: 'Entity relationship (ERD)', group: 'Data', build: (p) => erd(p), edit: '#/c/entities' },
   { id: 'class', title: 'Class diagram', group: 'Data', build: (p) => classDiagram(p), edit: '#/c/entities' },
+  { id: 'erdarea', title: 'ERD', group: 'Data model by area', parts: (p) => { const a = modelAreas(p); return a.length > 1 ? a.map((x) => ({ title: x.name, code: erd(p, x.list) })) : []; }, edit: '#/data' },
   { id: 'decision', title: 'Decision table flow', group: 'Logic', per: 'decisionTables', build: (p, x) => decisionFlow(p, x), edit: '#/c/decisionTables' },
   { id: 'stakeholders', title: 'Stakeholder map', group: 'People', build: (p) => stakeholderMap(p), edit: '#/stakeholders' },
   { id: 'trace', title: 'Traceability graph', group: 'Requirements', build: (p) => traceGraph(p), edit: '#/trace' },
+  { id: 'traceobj', title: 'Trace', group: 'Traceability by objective', parts: (p) => (p.objectives.length > 1 || p.requirements.length > LIMITS.partReqs ? traceParts(p) : []), edit: '#/trace' },
   { id: 'priority', title: 'Value vs effort', group: 'Requirements', build: (p) => valueEffort(p), edit: '#/prioritise' },
   { id: 'mindmap', title: 'Scope mind map', group: 'Strategy', build: (p) => mindmap(p), edit: '#/charter' },
   { id: 'roadmap', title: 'Release roadmap', group: 'Planning', build: (p) => roadmap(p), edit: '#/c/releases' },
@@ -368,7 +579,8 @@ export const DIAGRAMS = [
 export function allDiagrams(p) {
   const out = [];
   for (const d of DIAGRAMS) {
-    if (d.per) for (const x of p[d.per]) out.push({ key: `${d.id}:${x.id}`, def: d, title: `${d.title} — ${x.name || x.code}`, code: d.build(p, x, {}) });
+    if (d.parts) d.parts(p).forEach((x, i) => out.push({ key: `${d.id}:${i + 1}`, def: d, title: `${d.title} — ${x.title}`, code: x.code }));
+    else if (d.per) for (const x of p[d.per]) out.push({ key: `${d.id}:${x.id}`, def: d, title: `${d.title} — ${x.name || x.code}`, code: d.build(p, x, {}) });
     else out.push({ key: d.id, def: d, title: d.title, code: d.build(p) });
   }
   for (const c of p.diagrams) out.push({ key: `custom:${c.id}`, def: { id: 'custom', group: 'Custom' }, title: c.name, code: c.code });

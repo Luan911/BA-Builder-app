@@ -317,6 +317,7 @@ export const COLLECTIONS = {
     intro: 'Logical data model. Generates the ERD, class diagram, data dictionary and SQL DDL.',
     fields: [
       { key: 'name', label: 'Entity (singular, PascalCase)', req: true }, { key: 'owner', label: 'Data owner', type: 'select', options: o.stakeholders },
+      { key: 'area', label: 'Area / subject (optional)', ph: 'e.g. Customer, Lending, Payments', help: 'Big data models are drawn one area per diagram' },
       { key: 'description', label: 'Description', type: 'textarea', rows: 2 }, { key: 'classification', label: 'Classification', type: 'select', options: ['Public', 'Internal', 'Confidential', 'Personal (PII)', 'Sensitive'] }, { key: 'retention', label: 'Retention', ph: 'e.g. 7 years' },
       { key: 'fields', label: 'Attributes', type: 'rows', add: 'Add attribute', cols: [{ key: 'name', label: 'Name' }, { key: 'type', label: 'Type', type: 'select', options: FIELD_TYPES, w: '110px' }, { key: 'pk', label: 'PK', type: 'check', w: '36px' }, { key: 'required', label: 'Req', type: 'check', w: '36px' }, { key: 'unique', label: 'Uniq', type: 'check', w: '40px' }, { key: 'fk', label: 'References', type: 'select', options: o.entityNames, w: '130px' }, { key: 'desc', label: 'Description / validation', w: '1.4fr' }],
         newRow: (rows) => (rows.length ? { type: 'string' } : { name: 'id', type: 'uuid', pk: true, required: true, unique: true }) },
