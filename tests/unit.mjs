@@ -276,5 +276,69 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('link graph has no dangling ends', linkGraph(big).every(([ka, a, kb, b]) => big[ka].some((x) => x.id === a) && big[kb].some((x) => x.id === b)));
 }
 
+// ---------- normalisation to 3NF ----------
+{
+  const N = await import('../js/gen/normalise.js');
+  eq('words camelCase', N.words('customerEmailAddress'), ['customer', 'email', 'address']);
+  eq('words snake_case', N.words('customer_email'), ['customer', 'email']);
+  eq('words acronym', N.words('APIKey'), ['api', 'key']);
+  eq('singular', ['tags', 'categories', 'addresses', 'status'].map(N.singular), ['tag', 'category', 'address', 'status']);
+  const s = sampleProject();
+  t('sample model is already 3NF (no false alarms)', N.analyseModel(s).every((m) => m.nf === 3 && !m.issues.length), JSON.stringify(N.analyseModel(s).map((m) => m.issues.map((i) => i.title))));
+
+  const p = sampleProject();
+  p.entities.push({ id: 'pr', ...N.practiceEntity() });
+  const before = N.analyseEntity(p, p.entities.at(-1));
+  eq('practice table starts below 1NF', N.normalForm(before), 0);
+  eq('practice issues found', before.map((i) => i.id), ['nokey', 'repeat:product', 'multi:tags', 'transitive:customerId', 'group:branch', 'derived:orderTotal']);
+  t('own number (orderNo on OrderForm) is not flagged', !before.some((i) => i.fields.includes('orderDate')));
+  const log = N.applyAll(p, ['pr']);
+  t('apply all made changes', log.length === 5, log.join(' / '));
+  const by = (n) => p.entities.find((e) => e.name === n);
+  const of = (n) => by(n)?.fields.map((f) => f.name);
+  t('key added', by('OrderForm').fields.some((f) => f.pk && f.name === 'id'));
+  eq('repeating group becomes child rows', of('OrderFormProduct'), ['id', 'orderFormId', 'product', 'position']);
+  eq('list field becomes child rows', of('OrderFormTag'), ['id', 'orderFormId', 'tag']);
+  eq('new lookup entity with renamed attributes', of('Branch'), ['id', 'name', 'city']);
+  eq('existing Customer reused (name ↔ fullName, email) — nothing duplicated', of('Customer'), ['id', 'idNumber', 'fullName', 'email', 'dateOfBirth']);
+  eq('source keeps foreign keys', by('OrderForm').fields.filter((f) => f.fk).map((f) => `${f.name}->${f.fk}`), ['customerId->Customer', 'branchId->Branch']);
+  t('child tables point back to the source', by('OrderFormProduct').fields.find((f) => f.name === 'orderFormId').fk === 'OrderForm');
+  t('relationships added', ['OrderFormProduct', 'OrderFormTag', 'Branch', 'Customer'].every((n) => p.relationships.some((r) => [r.from, r.to].includes(by(n).id) && [r.from, r.to].includes('pr'))));
+  eq('only the derived total is left for the analyst', N.analyseEntity(p, by('OrderForm')).map((i) => i.id), ['derived:orderTotal']);
+  t('every entity created is in 3NF', ['OrderFormProduct', 'OrderFormTag', 'Branch'].every((n) => N.normalForm(N.analyseEntity(p, by(n))) === 3));
+  eq('apply all is idempotent', N.applyAll(p, ['pr']), []);
+  N.applyFix(p, 'pr', N.analyseEntity(p, by('OrderForm'))[0].fix);
+  eq('removing the derived value reaches 3NF', N.normalForm(N.analyseEntity(p, by('OrderForm'))), 3);
+  // dismissing a check
+  const d = sampleProject();
+  d.entities.push({ id: 'x', ...N.practiceEntity() });
+  d.entities.at(-1).normIgnore = ['group:branch'];
+  t('dismissed checks are hidden', !N.analyseEntity(d, d.entities.at(-1)).some((i) => i.id === 'group:branch'));
+  // 2NF: composite key
+  const q = sampleProject();
+  q.entities.push({ id: 'ol', name: 'OrderLine', fields: [{ name: 'orderId', type: 'uuid', pk: true }, { name: 'productId', type: 'uuid', pk: true }, { name: 'quantity', type: 'int' }, { name: 'productName', type: 'string' }, { name: 'productPrice', type: 'decimal' }] });
+  eq('partial dependency found', N.analyseEntity(q, q.entities.at(-1)).map((i) => `${i.form} ${i.id}`), ['2NF partial:productId']);
+  N.applyAll(q, ['ol']);
+  eq('2NF fix: Product holds its own details', q.entities.find((e) => e.name === 'Product').fields.map((f) => `${f.name}${f.pk ? '*' : ''}`), ['productId*', 'name', 'price']);
+  eq('2NF fix: OrderLine keeps the whole key and quantity', q.entities.find((e) => e.name === 'OrderLine').fields.map((f) => `${f.name}${f.pk ? '*' : ''}${f.fk ? `->${f.fk}` : ''}`), ['orderId*', 'productId*->Product', 'quantity']);
+  // manual split for a dependency only the analyst knows
+  const m = sampleProject();
+  const app = m.entities.find((e) => e.name === 'Application');
+  N.manualSplit(m, app.id, { target: 'Loan Term', move: ['termMonths'] });
+  t('manual split creates the entity and a foreign key', m.entities.some((e) => e.name === 'LoanTerm' && e.fields.some((f) => f.name === 'termMonths')) && app.fields.some((f) => f.name === 'loanTermId' && f.fk === 'LoanTerm') && !app.fields.some((f) => f.name === 'termMonths'));
+  const o = sampleProject();
+  o.entities.push({ id: 'of', ...N.practiceEntity() });
+  N.applyAll(o, ['of']);
+  N.manualSplit(o, 'of', { target: 'Order Line', move: ['quantity', 'unitPrice'], many: true });
+  const line = o.entities.find((e) => e.name === 'OrderLine');
+  eq('one-to-many split: child points back to the source', line.fields.map((f) => `${f.name}${f.fk ? `->${f.fk}` : ''}`), ['id', 'orderFormId->OrderForm', 'quantity', 'unitPrice']);
+  t('one-to-many split: source has no foreign key to the child', !o.entities.find((e) => e.id === 'of').fields.some((f) => f.fk === 'OrderLine'));
+  // snake_case models get snake_case names
+  const sn = blankProject('s');
+  sn.entities = [{ id: 'o', name: 'invoice', fields: [{ name: 'invoice_id', type: 'uuid', pk: true }, { name: 'supplier_id', type: 'uuid' }, { name: 'supplier_name', type: 'string' }] }];
+  N.applyAll(sn);
+  eq('snake_case style kept', sn.entities.find((e) => e.name === 'Supplier').fields.map((f) => f.name), ['supplier_id', 'name']);
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

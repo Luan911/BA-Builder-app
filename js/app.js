@@ -7,6 +7,7 @@ import { renderCharter } from './views/charter.js';
 import { renderStrategy } from './views/strategy.js';
 import { renderBusinessCase } from './views/businesscase.js';
 import { renderEstimate } from './views/estimate.js';
+import { renderNormalise } from './views/normalise.js';
 import { renderStakeholders } from './views/stakeholders.js';
 import { renderBoard } from './views/board.js';
 import { renderPrioritise } from './views/prioritise.js';
@@ -25,7 +26,7 @@ const NAV = [
   ['Strategy', [['c/objectives', 'Objectives', 'objectives'], ['strategy', 'SWOT & PESTLE'], ['c/gaps', 'Gap analysis', 'gaps'], ['business-case', 'Business case'], ['estimate', 'Cost & time estimate', 'workItems']]],
   ['Stakeholders', [['stakeholders', 'Stakeholders & RACI', 'stakeholders'], ['c/personas', 'Personas & actors', 'personas'], ['c/elicitation', 'Elicitation sessions', 'elicitation'], ['c/questions', 'Open questions', 'questions']]],
   ['Requirements', [['c/requirements', 'Requirements', 'requirements'], ['c/stories', 'User stories', 'stories'], ['board', 'Backlog board'], ['prioritise', 'Prioritisation'], ['c/usecases', 'Use cases', 'usecases'], ['c/rules', 'Business rules', 'rules'], ['decision-tables', 'Decision tables', 'decisionTables'], ['c/tests', 'Test cases (UAT)', 'tests'], ['trace', 'Traceability']]],
-  ['Solution design', [['c/processes', 'Process models', 'processes'], ['data', 'Data model', 'entities'], ['c/states', 'State machines', 'states'], ['c/apis', 'API endpoints', 'apis'], ['c/integrations', 'Integrations', 'integrations']]],
+  ['Solution design', [['c/processes', 'Process models', 'processes'], ['data', 'Data model', 'entities'], ['normalise', 'Normalise (3NF)'], ['c/states', 'State machines', 'states'], ['c/apis', 'API endpoints', 'apis'], ['c/integrations', 'Integrations', 'integrations']]],
   ['Control', [['c/raid', 'RAID log', 'raid'], ['c/decisions', 'Decision log', 'decisions'], ['c/changes', 'Change requests', 'changes'], ['c/releases', 'Releases', 'releases'], ['c/glossary', 'Glossary', 'glossary']]],
   ['Outputs', [['diagrams', 'Diagrams'], ['studio', 'Diagram studio', 'diagrams'], ['canvas', 'Whiteboard', 'canvases'], ['docs', 'Documents'], ['settings', 'Projects & export']]],
 ];
@@ -77,6 +78,7 @@ function route() {
     else if (a === 'strategy') renderStrategy(v);
     else if (a === 'business-case') renderBusinessCase(v);
     else if (a === 'estimate') renderEstimate(v);
+    else if (a === 'normalise') renderNormalise(v, b);
     else if (a === 'stakeholders') renderStakeholders(v);
     else if (a === 'board') renderBoard(v);
     else if (a === 'prioritise') renderPrioritise(v);
@@ -99,7 +101,7 @@ function route() {
 }
 
 function renderDataModel(v) {
-  v.innerHTML = `<div class="page-head"><div><h1>Data model</h1><p>Logical data model: entities with attributes, and the relationships between them. Drives the ERD, class diagram, data dictionary, SQL DDL and JSON Schema.</p></div><span class="grow"></span><a class="btn" href="#/diagrams/erd">View ERD</a></div><div data-a></div><div data-b style="margin-top:16px"></div>`;
+  v.innerHTML = `<div class="page-head"><div><h1>Data model</h1><p>Logical data model: entities with attributes, and the relationships between them. Drives the ERD, class diagram, data dictionary, SQL DDL and JSON Schema.</p></div><span class="grow"></span><a class="btn" href="#/normalise">Normalise to 3NF</a><a class="btn" href="#/diagrams/erd">View ERD</a></div><div data-a></div><div data-b style="margin-top:16px"></div>`;
   renderCollection($('[data-a]', v), 'entities', { heading: false });
   renderCollection($('[data-b]', v), 'relationships', { heading: false });
 }

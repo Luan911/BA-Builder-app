@@ -200,6 +200,7 @@ pre.code { font: 12.5px/1.55 var(--mono); background: #050505; color: var(--gree
 .paper h3 { font-size: 14px; margin: 16px 0 6px; color: #fff; }
 .paper table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 12.5px; }
 .tscroll { max-width: 100%; overflow-x: auto; }
+.tbl tr.sel td { background: var(--accent-weak); }
 @media print { .tscroll { overflow: visible; } }
 select { max-width: 100%; }
 .paper th, .paper td { border: 1px solid #2c2c2c; padding: 5px 8px; text-align: left; vertical-align: top; }

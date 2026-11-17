@@ -3,6 +3,7 @@ import { byId, nameOf, storyText, riskScore, riskLevel, businessCase, lintRequir
 import * as D from './diagrams.js';
 import { rtmRows, sqlDdl } from './exports.js';
 import { estimate } from '../estimate.js';
+import { analyseModel } from './normalise.js';
 
 const cell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim() || '—';
 export const table = (head, rows) => (rows.length ? [`| ${head.map(cell).join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...rows.map((r) => `| ${r.map(cell).join(' | ')} |`)].join('\n') : '_None recorded._');
@@ -157,6 +158,7 @@ const DOCS = {
     ...p.entities.map((e) => `### ${e.name}\n${table(['Attribute', 'Type', 'Key', 'Required', 'Unique', 'Description / validation'], (e.fields || []).map((f) => [f.name, f.type, [f.pk && 'PK', f.fk && `FK → ${f.fk}`].filter(Boolean).join(', '), f.required ? 'Yes' : 'No', f.unique ? 'Yes' : 'No', f.desc]))}`),
     `## 5. Relationships\n${table(['From', 'Cardinality', 'To', 'Meaning'], p.relationships.map((r) => [nameOf(p.entities, r.from), r.card, nameOf(p.entities, r.to), r.label]))}`,
     `## 6. Data requirements\n${reqTable(p, reqsOf(p, ['Data']))}`,
+    `## Normalisation check\nEach entity checked for first, second and third normal form: a primary key, one value per attribute, and no partial or transitive dependencies.\n\n${table(['Entity', 'Normal form', 'Open points'], analyseModel(p).map((m) => [m.entity.name, ['Not in 1NF', '1NF', '2NF', '3NF'][m.nf], m.issues.map((i) => `${i.form}: ${i.title}`).join('; ') || 'None']))}`,
     `## Appendix — SQL DDL\n\`\`\`sql\n${sqlDdl(p)}\n\`\`\``,
   ] },
 

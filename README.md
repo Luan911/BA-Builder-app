@@ -40,6 +40,7 @@ light version so they print cleanly on white paper.
 | **Agile** | User stories with Given/When/Then, drag-and-drop backlog board, MoSCoW · RICE · WSJF prioritisation, value-vs-effort chart, releases |
 | **Analysis models** | Fully dressed use cases, business rules, decision tables (with missing-combination check), UAT test cases |
 | **Solution design** | Swimlane process models (as-is / to-be, pain points), logical data model, state machines, API endpoints, integrations |
+| **Normalisation** | Checks every entity for 1NF / 2NF / 3NF (missing key, repeating groups, multi-valued fields, partial and transitive dependencies, stored calculations), explains each problem, and restructures the model on request: new entities, moved attributes, foreign keys and relationships, with a before / after ERD. Dismiss false alarms, split by hand for dependencies only you know, undo with Ctrl+Z. Includes a practice table |
 | **Control** | RAID log with risk scoring, decision log, change requests with impact analysis, glossary |
 | **Traceability** | RTM, objective coverage matrix, trace graph and an impact explorer (what changes if this requirement changes?) |
 
@@ -118,9 +119,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-168 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+197 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-splitting big diagrams (nothing lost, no part too big), the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), normalising to 3NF, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs
@@ -156,6 +157,7 @@ js/gen/exports.js     CSV, OpenAPI, SQL, JSON Schema, RTM
 js/views/             one file per screen
 js/estimate.js        cost & time maths: PERT, working-day calendar, schedule
 js/templates.js       NFR templates used by the SRS wizard
+js/gen/normalise.js   1NF / 2NF / 3NF checks and model restructuring
 tests/                automated tests (see below)
 ```
 
