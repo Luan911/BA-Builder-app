@@ -28,6 +28,7 @@ const STYLE = [
   'classDef task fill:#0d2416,stroke:#22c55e,color:#f2f2f2',
   'classDef sub fill:#111111,stroke:#4ade80,stroke-dasharray:4 3,color:#f2f2f2',
   'classDef pain stroke:#ef4444,stroke-width:3px',
+  'classDef event fill:#111111,stroke:#f87171,stroke-width:2px,color:#f2f2f2',
 ];
 
 // ---------- Process (BPMN-style swimlanes) ----------
@@ -40,6 +41,9 @@ export function processDiagram(p, pr, { lanes = true, direction = 'LR' } = {}) {
     if (s.kind === 'end') return `${n}(((${q(s.label || 'End')}))):::finish`;
     if (s.kind === 'decision') return `${n}{${q(s.label)}}:::decision`;
     if (s.kind === 'subprocess') return `${n}[[${q(s.label)}]]:::sub`;
+    if (s.kind === 'fork' || s.kind === 'join') return `${n}{${q(`+ ${s.label || (s.kind === 'fork' ? 'In parallel' : 'All done')}`)}}:::decision`; // BPMN parallel gateway
+    if (s.kind === 'timer') return `${n}((${q(`⏱ ${s.label}`)})):::event`;
+    if (s.kind === 'message') return `${n}((${q(`✉ ${s.label}`)})):::event`;
     return `${n}(${q(s.label)}):::task`;
   };
   if (lanes) {
@@ -68,52 +72,160 @@ export function processDiagram(p, pr, { lanes = true, direction = 'LR' } = {}) {
   return L.join('\n');
 }
 
-// ---------- Use case diagram ----------
+// ---------- UML activity diagram from the same process ----------
+// Initial node (filled circle), actions (rounded), decision diamonds with [guards] on the flows,
+// fork / join bars for parallel work, accept-event and time-event actions, activity final node,
+// and partitions (swimlanes) per lane.
+export function activityDiagram(p, pr, { lanes = true } = {}) {
+  const steps = (pr?.steps || []).filter((s) => s.id);
+  const L = ['flowchart TD'];
+  // labelled start / end steps become an action next to the (unlabelled) initial / final node
+  const extra = [];
+  const node = (s) => {
+    const n = id('S', s.id);
+    if (s.kind === 'start') { if (s.label) extra.push(`  ${n}_i((" ")):::initial --> ${n}`); return s.label ? `${n}(${q(s.label)}):::action` : `${n}((" ")):::initial`; }
+    if (s.kind === 'end') { if (s.label) extra.push(`  ${n} --> ${n}_f(((" "))):::final`); return s.label ? `${n}(${q(s.label)}):::action` : `${n}(((" "))):::final`; }
+    if (s.kind === 'decision') return `${n}{${q(s.label)}}:::decision`;
+    if (s.kind === 'fork' || s.kind === 'join') return `${n}[" "]:::bar`;
+    if (s.kind === 'timer') return `${n}>${q(`⧗ ${s.label}`)}]:::evt`;
+    if (s.kind === 'message') return `${n}>${q(`✉ ${s.label}`)}]:::evt`;
+    if (s.kind === 'subprocess') return `${n}(${q(`${s.label} ⋔`)}):::action`;
+    return `${n}(${q(s.label)}):::action`;
+  };
+  if (lanes) {
+    for (const lane of [...new Set(steps.map((s) => s.lane || 'Unassigned'))]) {
+      L.push(`  subgraph ${id('L', lane)}[${q(lane)}]`);
+      for (const s of steps.filter((x) => (x.lane || 'Unassigned') === lane)) L.push(`    ${node(s)}`);
+      L.push('  end');
+    }
+  } else steps.forEach((s) => L.push(`  ${node(s)}`));
+  const has = new Set(steps.map((s) => s.id));
+  steps.forEach((s, i) => {
+    const from = id('S', s.id);
+    if (s.kind === 'end') return;
+    if (s.kind === 'decision') {
+      if (has.has(s.yes)) L.push(`  ${from} -->|"[yes]"| ${id('S', s.yes)}`);
+      if (has.has(s.no)) L.push(`  ${from} -->|"[no]"| ${id('S', s.no)}`);
+      return;
+    }
+    String(s.next || steps[i + 1]?.id || '').split(/[,\s]+/).filter((t) => has.has(t)).forEach((t) => L.push(`  ${from} --> ${id('S', t)}`));
+  });
+  L.push(...extra);
+  if (!steps.length) L.push(`  E[${q('Add process steps to draw this diagram')}]`);
+  L.push('  classDef initial fill:#f2f2f2,stroke:#f2f2f2,color:#f2f2f2', '  classDef final fill:#f2f2f2,stroke:#ef4444,stroke-width:3px,color:#f2f2f2', '  classDef action fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef decision fill:#1a0b0b,stroke:#ef4444,color:#f2f2f2', '  classDef bar fill:#f2f2f2,stroke:#f2f2f2,color:#f2f2f2', '  classDef evt fill:#111111,stroke:#f87171,color:#f2f2f2');
+  return L.join('\n');
+}
+
+// ---------- Use case diagram (UML) ----------
+// Subject (system boundary) with use cases inside; actors outside, primary on the left and
+// secondary on the right; plain association lines; dashed «include» (base → included) and
+// «extend» (extension → base); generalisation from child actor to parent actor.
 export function useCaseDiagram(p) {
   const L = ['flowchart LR'];
-  const used = new Set(p.usecases.flatMap((u) => [u.primary, ...(u.secondary || [])]).filter(Boolean));
-  const actors = p.personas.filter((a) => used.has(a.id));
-  const humans = actors.filter((a) => a.kind !== 'System');
-  const systems = actors.filter((a) => a.kind === 'System');
-  humans.forEach((a) => L.push(`  ${id('A', a.id)}[${q(`👤 ${a.name}`)}]`));
+  const primaryIds = new Set(p.usecases.map((u) => u.primary).filter(Boolean));
+  const secondaryIds = new Set(p.usecases.flatMap((u) => u.secondary || []).filter((x) => x && !primaryIds.has(x)));
+  // actors that only appear as parents of others still need drawing
+  const withParents = new Set([...primaryIds, ...secondaryIds]);
+  for (const a of p.personas) if (withParents.has(a.id) && a.parent) withParents.add(a.parent);
+  const actor = (a) => `${id('A', a.id)}[${q(`${a.kind === 'System' ? '«system» ' : '👤 '}${a.name}`)}]:::actor`;
+  p.personas.filter((a) => withParents.has(a.id) && !secondaryIds.has(a.id)).forEach((a) => L.push(`  ${actor(a)}`));
   L.push(`  subgraph SYS[${q(p.meta.name || 'System')}]`, '    direction TB');
-  p.usecases.forEach((u) => L.push(`    ${id('U', u.id)}([${q(`${u.code} ${u.name}`)}])`));
+  p.usecases.forEach((u) => L.push(`    ${id('U', u.id)}([${q(`${u.code} ${u.name}`)}]):::uc`));
   L.push('  end');
-  systems.forEach((a) => L.push(`  ${id('A', a.id)}[${q(`⚙ ${a.name}`)}]`));
+  p.personas.filter((a) => secondaryIds.has(a.id)).forEach((a) => L.push(`  ${actor(a)}`));
   for (const u of p.usecases) {
-    if (u.primary) L.push(`  ${id('A', u.primary)} --- ${id('U', u.id)}`);
-    for (const s of u.secondary || []) L.push(`  ${id('U', u.id)} --- ${id('A', s)}`);
-    for (const inc of u.includes || []) if (byId(p.usecases, inc)) L.push(`  ${id('U', u.id)} -.->|include| ${id('U', inc)}`);
+    if (byId(p.personas, u.primary)) L.push(`  ${id('A', u.primary)} --- ${id('U', u.id)}`);
+    for (const s2 of u.secondary || []) if (byId(p.personas, s2)) L.push(`  ${id('U', u.id)} --- ${id('A', s2)}`);
+    for (const inc of u.includes || []) if (byId(p.usecases, inc) && inc !== u.id) L.push(`  ${id('U', u.id)} -.->|«include»| ${id('U', inc)}`);
+    for (const ext of u.extends || []) if (byId(p.usecases, ext) && ext !== u.id) L.push(`  ${id('U', u.id)} -.->|«extend»| ${id('U', ext)}`);
   }
-  L.push('  classDef default fill:#0d2416,stroke:#22c55e,color:#f2f2f2');
+  for (const a of p.personas) if (withParents.has(a.id) && a.parent && byId(p.personas, a.parent) && a.parent !== a.id) L.push(`  ${id('A', a.id)} -->|is a| ${id('A', a.parent)}`);
+  L.push('  classDef actor fill:#000000,stroke:#f87171,color:#f2f2f2', '  classDef uc fill:#0d2416,stroke:#22c55e,color:#f2f2f2');
   if (!p.usecases.length) L.push(`  EMPTY[${q('Add use cases to draw this diagram')}]`);
   return L.join('\n');
 }
 
-// ---------- Sequence diagram from a use case main flow ----------
+// ---------- Sequence diagram (UML) from a use case ----------
+// Actor and system lifelines; synchronous calls (solid arrow) with activation bars, return
+// messages (dashed), asynchronous notifications (open arrow), calls to supporting systems, and
+// alternative / exception flows as alt fragments at the step they branch from ("3a. …").
+const ASYNC = /\b(notif|email|e-mail|sms|text message|push|alert|publish|send[s]? (a |an )?(message|letter))/i;
+const msg = (t) => String(t).replace(/[:;#]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 110) || '…';
+function flowSplit(list) {
+  const out = new Map();
+  for (const raw of list || []) {
+    const m = String(raw).match(/^\s*(\d+)\s*([a-z])?[.)]?\s*(.*)$/i);
+    const step = m ? +m[1] : 0;
+    const text = m ? m[3] : String(raw);
+    const [cond, ...rest] = text.split(':');
+    if (!out.has(step)) out.set(step, []);
+    out.get(step).push({ cond: msg(rest.length ? cond : text), outcome: rest.length ? msg(rest.join(':')) : '' });
+  }
+  return out;
+}
 export function sequenceDiagram(p, uc) {
   const L = ['sequenceDiagram', '  autonumber'];
   if (!uc) return `${L.join('\n')}\n  participant S as System\n  Note over S: Add a use case with steps`;
   const primary = byId(p.personas, uc.primary);
   const others = (uc.secondary || []).map((x) => byId(p.personas, x)).filter(Boolean);
-  L.push(`  actor P as ${word(primary?.name || 'User')}`, `  participant S as ${word(p.meta.name || 'System')}`);
-  others.forEach((o, i) => L.push(`  participant O${i} as ${word(o.name)}`));
+  L.push(`  ${primary?.kind === 'System' ? 'participant' : 'actor'} P as ${word(primary?.name || 'User')}`, `  participant S as ${word(p.meta.name || 'System')}`);
+  others.forEach((o, i) => L.push(`  ${o.kind === 'System' ? 'participant' : 'actor'} O${i} as ${word(o.name)}`));
   const pname = (primary?.name || 'user').toLowerCase();
-  for (const raw of uc.main || []) {
-    const step = String(raw).replace(/[:;#]/g, ' ').trim();
+  const steps = (uc.main || []).map(msg);
+  const alts = flowSplit(uc.alt), excs = flowSplit(uc.exceptions);
+  const lines = (step, i) => {
     const low = step.toLowerCase();
     const oi = others.findIndex((o) => low.includes(o.name.toLowerCase()));
-    if (oi >= 0) {
-      L.push(`  S->>O${oi}: ${step}`, `  O${oi}-->>S: response`);
-    } else if (low.startsWith('system')) L.push(`  S-->>P: ${step}`);
-    else if (low.startsWith(pname) || !low.startsWith('system')) L.push(`  P->>S: ${step}`);
-  }
-  for (const a of uc.alt || []) L.push(`  Note over P,S: Alt ${String(a).replace(/[:;#]/g, ' ').slice(0, 90)}`);
+    if (oi >= 0) return [`  S->>+O${oi}: ${step}`, `  O${oi}-->>-S: Result`];
+    if (low.startsWith('system')) {
+      if (ASYNC.test(step)) return [`  S-)P: ${step}`];
+      // system work the user does not see is a self message (validate, calculate, save…)
+      if (!/\b(show|shows|display|displays|present|presents|return|returns|inform|informs|confirm|confirms|ask|asks|prompt|prompts|redirect|redirects|offer|offers|list|lists)\b/.test(low)) return [`  S->>S: ${step}`];
+      return [`  S-->>P: ${step}`];
+    }
+    // a user action answered by the system in the next step is a synchronous call with activation
+    const next = steps[i + 1]?.toLowerCase() || '';
+    return [next.startsWith('system') ? `  P->>S: ${step}` : `  P->>S: ${step}`];
+  };
+  steps.forEach((step, i) => {
+    const n = i + 1;
+    const branches = [...(alts.get(n) || []).map((b) => ['Alternative', b]), ...(excs.get(n) || []).map((b) => ['Exception', b])];
+    if (!branches.length) return L.push(...lines(step, i));
+    L.push(`  alt Main flow`, ...lines(step, i).map((x) => `  ${x}`));
+    for (const [kind, b] of branches) L.push(`  else ${kind} ${b.cond}`, `    S-->>P: ${b.outcome || 'Handle the alternative'}`);
+    L.push('  end');
+  });
+  // branches that are not tied to a step number go at the end
+  for (const [kind, map] of [['Alternative', alts], ['Exception', excs]]) for (const b of map.get(0) || []) L.push(`  opt ${kind} ${b.cond}`, `    S-->>P: ${b.outcome || 'Handle it'}`, '  end');
+  // activation bars around each user request that the system answers
+  for (let i = 0; i < L.length - 1; i++) if (/^\s*P->>S: /.test(L[i]) && /^\s*S-->>P: /.test(L[i + 1])) { L[i] = L[i].replace('P->>S:', 'P->>+S:'); L[i + 1] = L[i + 1].replace('S-->>P:', 'S-->>-P:'); }
+  return L.join('\n');
+}
+
+// ---------- Communication (collaboration) diagram from the same use case ----------
+export function communicationDiagram(p, uc) {
+  const L = ['flowchart LR'];
+  if (!uc) return `${L[0]}\n  A[${q('Add a use case with steps')}]`;
+  const primary = byId(p.personas, uc.primary);
+  const others = (uc.secondary || []).map((x) => byId(p.personas, x)).filter(Boolean);
+  L.push(`  P[${q(`${primary?.kind === 'System' ? '' : '👤 '}: ${primary?.name || 'User'}`)}]:::actor`, `  S[${q(`: ${p.meta.name || 'System'}`)}]:::obj`);
+  others.forEach((o, i) => L.push(`  O${i}[${q(`: ${o.name}`)}]:::obj`));
+  const links = new Map();
+  const add = (from, to, text) => { const k = `${from}>${to}`; if (!links.has(k)) links.set(k, []); links.get(k).push(text); };
+  (uc.main || []).forEach((raw, i) => {
+    const step = msg(raw), low = step.toLowerCase(), n = i + 1;
+    const oi = others.findIndex((o) => low.includes(o.name.toLowerCase()));
+    if (oi >= 0) add('S', `O${oi}`, `${n}: ${step}`);
+    else if (low.startsWith('system')) add('S', /\b(shows?|display|displays|presents?|returns?|informs?|confirms?|asks?|prompts?|notif|email|sms)/.test(low) ? 'P' : 'S', `${n}: ${step}`);
+    else add('P', 'S', `${n}: ${step}`);
+  });
+  for (const [k, list] of links) { const [a, b] = k.split('>'); L.push(`  ${a} -->|${q(list.map((t) => t.slice(0, 48)).join(' · '))}| ${b}`); }
+  L.push('  classDef actor fill:#000000,stroke:#f87171,color:#f2f2f2', '  classDef obj fill:#0d2416,stroke:#22c55e,color:#f2f2f2');
   return L.join('\n');
 }
 
 // ---------- ERD ----------
-const CARD = { 'one-to-one': '||--||', 'one-to-many': '||--o{', 'many-to-many': '}o--o{', 'zero-or-one-to-many': '|o--o{' };
+const CARD = { 'one-to-one': '||--||', 'one-to-many': '||--o{', 'many-to-many': '}o--o{', 'zero-or-one-to-many': '|o--o{', 'one-to-one-or-more': '||--|{', 'one-to-zero-or-one': '||--o|' };
 export function erd(p, only = null, { compact: keysOnly = false, stubs = true } = {}) {
   const L = ['erDiagram'];
   const compact = keysOnly || (!only && p.entities.length > LIMITS.modelEntities);
@@ -136,6 +248,7 @@ export function erd(p, only = null, { compact: keysOnly = false, stubs = true } 
   for (const r of p.relationships) {
     const a = byId(ents, r.from), b = byId(ents, r.to);
     if (!a || !b) continue;
+    if (r.kind === 'generalisation') { L.push(`  ${ident(a.name)} ||--o| ${ident(b.name)} : "is a (subtype)"`); continue; }
     pairs.add(`${a.name}>${b.name}`);
     L.push(`  ${ident(a.name)} ${CARD[r.card] || '||--o{'} ${ident(b.name)} : ${q(r.label || 'relates to')}`);
   }
@@ -160,18 +273,24 @@ export function classDiagram(p, only = null, { compact: keysOnly = false, stubs 
     L.push(`  class ${ident(e.name)} {`);
     const fields = (e.fields || []).filter((f) => f.name);
     const shown = compact ? fields.filter((f) => f.pk || f.fk) : fields;
-    for (const f of shown) L.push(`    ${f.pk ? '+' : '-'}${ident(f.type || 'string')} ${ident(f.name)}`);
+    // attributes: type and name, with keys marked; visibility is left out of a logical model
+    for (const f of shown) L.push(`    ${ident(f.type || 'string')} ${ident(f.name)}${f.pk ? ' PK' : f.fk ? ' FK' : ''}`);
+    if (!compact) for (const op of e.operations || []) if (String(op).trim()) L.push(`    +${String(op).trim().replace(/[{}]/g, '').replace(/^\+/, '').replace(/(\w)\s*$/, '$1()').slice(0, 60)}`);
     if (compact && shown.length < fields.length) L.push(`    -more_${fields.length - shown.length}_attributes`);
     L.push('  }');
     const st = p.states.find((s) => s.entity === e.id);
     if (st) L.push(`  <<stateful>> ${ident(e.name)}`);
   }
-  const MULT = { 'one-to-one': ['"1"', '"1"'], 'one-to-many': ['"1"', '"*"'], 'many-to-many': ['"*"', '"*"'], 'zero-or-one-to-many': ['"0..1"', '"*"'] };
+  const MULT = { 'one-to-one': ['"1"', '"1"'], 'one-to-many': ['"1"', '"*"'], 'many-to-many': ['"*"', '"*"'], 'zero-or-one-to-many': ['"0..1"', '"*"'], 'one-to-one-or-more': ['"1"', '"1..*"'], 'one-to-zero-or-one': ['"1"', '"0..1"'] };
+  // UML: association = plain line (no navigability arrows), aggregation = hollow diamond on the whole,
+  // composition = filled diamond on the whole, generalisation = hollow triangle on the parent
+  const LINE = { association: '--', aggregation: 'o--', composition: '*--' };
   for (const r of p.relationships) {
     const a = byId(ents, r.from), b = byId(ents, r.to);
     if (!a || !b) continue;
+    if (r.kind === 'generalisation') { L.push(`  ${ident(a.name)} <|-- ${ident(b.name)}`); continue; }
     const [m1, m2] = MULT[r.card] || MULT['one-to-many'];
-    L.push(`  ${ident(a.name)} ${m1} --> ${m2} ${ident(b.name)} : ${word(r.label || 'has')}`);
+    L.push(`  ${ident(a.name)} ${m1} ${LINE[r.kind] || '--'} ${m2} ${ident(b.name)} : ${word(r.label || 'has')}`);
   }
   if (!p.entities.length) L.push('  class Empty');
   return L.join('\n');
@@ -187,7 +306,7 @@ export function stateDiagram(p, sm) {
   if (sm.initial) L.push(`  [*] --> ${sid(sm.initial)}`);
   for (const t of sm.transitions || []) {
     if (!t.from || !t.to) continue;
-    const label = [t.event, t.guard && `[${t.guard}]`].filter(Boolean).join(' ').replace(/[:;#]/g, ' ').replace(/[[\]]/g, (c) => (c === '[' ? '(' : ')'));
+    const label = [t.event, t.guard && `[${t.guard}]`, t.action && `/ ${t.action}`].filter(Boolean).join(' ').replace(/[:;#]/g, ' ').replace(/[[\]]/g, (c) => (c === '[' ? '(' : ')'));
     L.push(`  ${sid(t.from)} --> ${sid(t.to)}${label ? ` : ${label}` : ''}`);
   }
   for (const f of sm.finals || []) if (names.includes(f)) L.push(`  ${sid(f)} --> [*]`);
@@ -555,15 +674,83 @@ export function decisionFlow(p, dt) {
   return L.join('\n');
 }
 
+// ---------- Data flow: screen → API → database ----------
+export function dataFlow(p, scr) {
+  const L = ['flowchart LR'];
+  if (!scr) return `${L[0]}\n  A[${q('Add a screen with fields')}]`;
+  const fields = (scr.fields || []).filter((f) => f.label && f.control !== 'Button');
+  const apis = (scr.apiIds || []).map((x) => byId(p.apis, x)).filter(Boolean);
+  const ents = [...new Set(fields.map((f) => String(f.mapsTo || '').split('.')[0]).filter((n) => p.entities.some((e) => e.name === n)))];
+  L.push(`  subgraph FE[${q('Front end · what the user sees')}]`, '    direction TB', `    SCR[${q(`🖥 ${scr.name}`)}]:::screen`);
+  fields.forEach((f, i) => L.push(`    F${i}[${q(`${f.label}${f.required ? ' *' : ''}`)}]:::field`));
+  L.push('  end');
+  L.push(`  subgraph BE[${q('Back end · API and business rules')}]`, '    direction TB');
+  apis.forEach((a, i) => L.push(`    API${i}[${q(`${a.method} ${a.path}`)}]:::api`));
+  if (!apis.length) L.push(`    API_NONE[${q('No API linked yet')}]:::missing`);
+  L.push('  end', `  subgraph DB[${q('Database · where it is stored')}]`, '    direction TB');
+  ents.forEach((n) => L.push(`    ${id('T', n)}[(${q(n)})]:::table`));
+  L.push('  end');
+  fields.forEach((f, i) => L.push(`  F${i} --- SCR`));
+  apis.forEach((a, i) => L.push(`  SCR -->|${q(a.method === 'GET' ? 'reads' : 'submits')}| API${i}`));
+  if (!apis.length) L.push('  SCR -.-> API_NONE');
+  const via = apis.length ? 'API0' : 'API_NONE';
+  for (const n of ents) {
+    const attrs = fields.filter((f) => String(f.mapsTo).startsWith(`${n}.`)).map((f) => f.mapsTo.split('.')[1]);
+    L.push(`  ${via} -->|${q(attrs.join(', ').slice(0, 60))}| ${id('T', n)}`);
+  }
+  const unmapped = fields.filter((f) => !f.mapsTo);
+  if (unmapped.length) L.push(`  UNM[${q(`Not mapped: ${unmapped.map((f) => f.label).join(', ')}`.slice(0, 90))}]:::missing`, `  FE -.- UNM`);
+  L.push('  classDef screen fill:#22c55e,stroke:#15803d,color:#000000', '  classDef field fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef api fill:#111111,stroke:#4ade80,color:#f2f2f2', '  classDef table fill:#0a0a0a,stroke:#22c55e,color:#f2f2f2', '  classDef missing fill:#2a0e0e,stroke:#ef4444,stroke-dasharray:4 3,color:#f2f2f2');
+  return L.join('\n');
+}
+
+// ---------- Architecture: as-is / to-be landscape and layered view ----------
+const LAYER_ORDER = ['Presentation (UI)', 'Business logic / services', 'Integration / middleware', 'Data', 'External system'];
+const inView = (c, view) => (view === 'as-is' ? !/^To-be/.test(c.state || '') : !/^As-is/.test(c.state || ''));
+const connIn = (x, view) => (view === 'as-is' ? x.state !== 'To-be only' : x.state !== 'As-is only');
+export function architecture(p, view = 'to-be') {
+  const comps = p.components.filter((c) => inView(c, view === 'layers' ? 'to-be' : view));
+  const L = [view === 'layers' ? 'flowchart TB' : 'flowchart LR'];
+  if (!comps.length) return `${L[0]}\n  A[${q('Add architecture components to draw this view')}]`;
+  const node = (c) => `${id('C', c.id)}[${q(`${c.name}${c.technology ? ` (${c.technology})` : ''}`)}]:::${/^To-be/.test(c.state || '') ? 'added' : /^As-is/.test(c.state || '') ? 'retiring' : c.layer === 'External system' ? 'ext' : 'comp'}`;
+  if (view === 'layers') {
+    for (const layer of LAYER_ORDER) {
+      const list = comps.filter((c) => (c.layer || 'Business logic / services') === layer);
+      if (!list.length) continue;
+      L.push(`  subgraph ${id('LY', layer)}[${q(layer)}]`, '    direction LR', ...list.map((c) => `    ${node(c)}`), '  end');
+    }
+  } else comps.forEach((c) => L.push(`  ${node(c)}`));
+  const ids = new Set(comps.map((c) => c.id));
+  const manual = [];
+  let n = 0;
+  for (const c of comps) for (const x of c.connections || []) {
+    if (!ids.has(x.to) || !connIn(x, view === 'layers' ? 'to-be' : view)) continue;
+    const label = [x.method, x.frequency].filter(Boolean).join(' · ');
+    const isManual = /Manual/.test(x.method || '');
+    L.push(`  ${id('C', c.id)} ${isManual ? '-.->' : '-->'}${label ? `|${q(label)}|` : ''} ${id('C', x.to)}`);
+    if (isManual) manual.push(n);
+    n++;
+  }
+  if (manual.length) L.push(`  linkStyle ${manual.join(',')} stroke:#ef4444,stroke-width:2px`);
+  L.push('  classDef comp fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef added fill:#22c55e,stroke:#15803d,color:#000000', '  classDef retiring fill:#2a0e0e,stroke:#ef4444,stroke-dasharray:4 3,color:#f2f2f2', '  classDef ext fill:#111111,stroke:#8c8c8c,color:#f2f2f2');
+  return L.join('\n');
+}
+
 // ---------- registry ----------
 export const DIAGRAMS = [
-  { id: 'context', title: 'System context', group: 'Architecture', build: (p) => contextDiagram(p), edit: '#/c/integrations' },
-  { id: 'process', title: 'Process flow (BPMN-style)', group: 'Process', per: 'processes', build: (p, x, o) => processDiagram(p, x, o), edit: '#/c/processes' },
-  { id: 'usecase', title: 'Use case diagram', group: 'Behaviour', build: (p) => useCaseDiagram(p), edit: '#/c/usecases' },
-  { id: 'sequence', title: 'Sequence (from use case)', group: 'Behaviour', per: 'usecases', build: (p, x) => sequenceDiagram(p, x), edit: '#/c/usecases' },
-  { id: 'state', title: 'State machine', group: 'Behaviour', per: 'states', build: (p, x) => stateDiagram(p, x), edit: '#/c/states' },
-  { id: 'erd', title: 'Entity relationship (ERD)', group: 'Data', build: (p) => erd(p), edit: '#/c/entities' },
-  { id: 'class', title: 'Class diagram', group: 'Data', build: (p) => classDiagram(p), edit: '#/c/entities' },
+  { id: 'arch-asis', title: 'Landscape — as-is', group: 'Architecture', build: (p) => architecture(p, 'as-is'), edit: '#/c/components', legend: 'Today\'s systems and how they connect. Red dashed links are manual (spreadsheets, re-keying, daily exports); red boxes will be retired.' },
+  { id: 'arch-tobe', title: 'Landscape — to-be', group: 'Architecture', build: (p) => architecture(p, 'to-be'), edit: '#/c/components', legend: 'The target landscape. Green boxes are new components; labels say how and how often data moves (REST, events, files).' },
+  { id: 'arch-layers', title: 'Layered architecture (to-be)', group: 'Architecture', build: (p) => architecture(p, 'layers'), edit: '#/c/components', legend: 'Presentation (what users see) → business logic (rules, workflows, validation — where most requirements are implemented) → integration → data (where information is stored) → external systems.' },
+  { id: 'dataflow', title: 'Data flow', group: 'Data mapping', per: 'screens', build: (p, x) => dataFlow(p, x), edit: '#/c/screens', legend: 'How data moves from a screen, through the API and business rules, to the database tables. * = required on screen. Red = fields not yet mapped to where they are stored.' },
+  { id: 'context', title: 'System context', group: 'Architecture', build: (p) => contextDiagram(p), edit: '#/c/integrations', legend: 'Context (C4 level 1): the solution in the middle, the people who use it, and the external systems it exchanges data with, labelled with protocol and frequency.' },
+  { id: 'process', title: 'Process flow (BPMN-style)', group: 'Process', per: 'processes', build: (p, x, o) => processDiagram(p, x, o), edit: '#/c/processes', legend: 'BPMN-style: circle = start event, double circle = end event, rounded box = task, diamond = exclusive decision, diamond with + = parallel gateway (fork / join), ⏱ = timer event, ✉ = message event, double-edged box = sub-process. Lanes show who does each step; red outline = pain point.' },
+  { id: 'activity', title: 'Activity diagram (UML)', group: 'Process', per: 'processes', build: (p, x) => activityDiagram(p, x), edit: '#/c/processes', legend: 'UML activity: filled circle = initial node, ringed circle = activity final, rounded box = action, diamond = decision with [guard] on each outgoing flow, bar = fork / join for parallel flows, flag shapes = accept-event (✉) and time-event (⧗) actions, ⋔ = calls a sub-activity. Partitions (swimlanes) show who is responsible.' },
+  { id: 'usecase', title: 'Use case diagram', group: 'Behaviour', build: (p) => useCaseDiagram(p), edit: '#/c/usecases', legend: 'UML use case: the box is the system boundary (subject); use cases (ovals, verb + noun) inside, actors (roles, not people) outside — primary actors on the left, secondary on the right. Plain lines = association. «include» points from the base use case to the one it always performs; «extend» points from the optional extension to the use case it extends. "is a" = actor generalisation (child inherits the parent\'s use cases).' },
+  { id: 'sequence', title: 'Sequence (from use case)', group: 'Behaviour', per: 'usecases', build: (p, x) => sequenceDiagram(p, x), edit: '#/c/usecases', legend: 'UML sequence: time runs downwards along each lifeline. Solid arrow = synchronous call, dashed arrow = return message, open arrow = asynchronous message (e.g. a notification), bars = activation (the lifeline is busy). alt = alternative or exception paths from the use case ("3a. …"), opt = optional behaviour.' },
+  { id: 'communication', title: 'Communication diagram (from use case)', group: 'Behaviour', per: 'usecases', build: (p, x) => communicationDiagram(p, x), edit: '#/c/usecases', legend: 'UML communication (collaboration): the same messages as the sequence diagram, numbered in order, drawn on the links between the participants. Use it to see who talks to whom; use the sequence diagram to see timing.' },
+  { id: 'state', title: 'State machine', group: 'Behaviour', per: 'states', build: (p, x) => stateDiagram(p, x), edit: '#/c/states', legend: 'UML state machine: filled circle = initial pseudostate, ringed circle = final state, rounded boxes = states, arrows = transitions labelled event [guard] / action.' },
+  { id: 'erd', title: 'Entity relationship (ERD)', group: 'Data', build: (p) => erd(p), edit: '#/c/entities', legend: 'Crow\'s foot: || = exactly one, |o = zero or one, }o = zero or many, }| = one or many. PK = primary key, FK = foreign key, UK = unique.' },
+  { id: 'class', title: 'Class diagram', group: 'Data', build: (p) => classDiagram(p), edit: '#/c/entities', legend: 'UML class: class names are singular nouns; attributes are shown as type name (PK / FK mark keys); operations end in (). Plain line = association with multiplicity at each end (1, 0..1, *, 1..*); hollow diamond = aggregation (parts can exist alone); filled diamond = composition (parts are destroyed with the whole); hollow triangle = generalisation (child is a kind of parent).' },
   { id: 'erdarea', title: 'ERD', group: 'Data model by area', parts: (p) => { const a = modelAreas(p); return a.length > 1 ? a.map((x) => ({ title: x.name, code: erd(p, x.list) })) : []; }, edit: '#/data' },
   { id: 'decision', title: 'Decision table flow', group: 'Logic', per: 'decisionTables', build: (p, x) => decisionFlow(p, x), edit: '#/c/decisionTables' },
   { id: 'stakeholders', title: 'Stakeholder map', group: 'People', build: (p) => stakeholderMap(p), edit: '#/stakeholders' },

@@ -28,14 +28,18 @@ export const REQ_TYPES = [
   { value: 'Interface', label: 'Interface (IR)', prefix: 'IR' },
   { value: 'Transition', label: 'Transition (TR)', prefix: 'TR' },
 ];
-export const NFR_CATS = ['Performance', 'Availability', 'Security', 'Privacy', 'Usability', 'Accessibility', 'Scalability', 'Reliability', 'Maintainability', 'Compliance', 'Auditability'];
+export const NFR_CATS = ['Performance', 'Availability', 'Security', 'Privacy', 'Usability', 'Accessibility', 'Scalability', 'Reliability', 'Maintainability', 'Compliance', 'Auditability', 'AI governance'];
+export const TEST_LEVELS = ['Unit', 'System (ST)', 'Integration (SIT)', 'User acceptance (UAT)', 'Regression', 'Performance'];
+export const LAYERS = ['Presentation (UI)', 'Business logic / services', 'Integration / middleware', 'Data', 'External system'];
+export const CONTROLS = ['Text', 'Number', 'Currency', 'Date', 'Dropdown', 'Radio buttons', 'Checkbox', 'Text area', 'Email', 'Phone', 'File upload', 'Read-only', 'Button'];
 export const REQ_STATUS = ['Draft', 'Proposed', 'Approved', 'Implemented', 'Rejected'];
 export const STORY_STATUS = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'];
 export const ELICIT_TYPES = ['Interview', 'Workshop', 'Survey', 'Observation', 'Document analysis', 'Focus group', 'Brainstorming', 'Prototype review', 'Demo'];
 export const ATTITUDES = ['Champion', 'Supporter', 'Neutral', 'Critic', 'Blocker'];
-export const STEP_KINDS = ['start', 'task', 'decision', 'subprocess', 'end'];
+export const STEP_KINDS = ['start', 'task', 'decision', 'fork', 'join', 'timer', 'message', 'subprocess', 'end'];
 export const FIELD_TYPES = ['string', 'text', 'int', 'decimal', 'boolean', 'date', 'datetime', 'uuid', 'email', 'enum', 'json'];
-export const CARDS = ['one-to-one', 'one-to-many', 'many-to-many', 'zero-or-one-to-many'];
+export const CARDS = ['one-to-one', 'one-to-many', 'many-to-many', 'zero-or-one-to-many', 'one-to-one-or-more', 'one-to-zero-or-one'];
+export const REL_KINDS = ['association', 'aggregation', 'composition', 'generalisation'];
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export const RAID_TYPES = ['Risk', 'Assumption', 'Issue', 'Dependency'];
 export const CR_STATUS = ['Proposed', 'Under review', 'Approved', 'Rejected', 'Implemented'];
@@ -53,6 +57,11 @@ const o = {
   releases: (p) => p.releases.map((x) => ({ value: x.id, label: x.name })),
   epics: (p) => [...new Set(p.stories.map((s) => s.epic).filter(Boolean))],
   rates: (p) => p.rates.map((x) => ({ value: x.id, label: `${x.role} (${x.dayRate || 0}/day)` })),
+  attributes: (p) => p.entities.flatMap((e) => (e.fields || []).filter((f) => f.name).map((f) => `${e.name}.${f.name}`)),
+  apis: (p) => p.apis.map((x) => ({ value: x.id, label: `${x.method} ${x.path}` })),
+  usecases: (p) => p.usecases.map((x) => ({ value: x.id, label: `${x.code} ${x.name}` })),
+  tests: (p) => p.tests.map((x) => ({ value: x.id, label: `${x.code} ${x.title}` })),
+  components: (p) => p.components.map((x) => ({ value: x.id, label: x.name })),
 };
 export const lookup = o;
 
@@ -89,6 +98,56 @@ export function lintRequirement(r, p) {
   if (['Functional', 'Non-functional'].includes(r.type) && !(r.acceptance || []).length) out.push('No acceptance criteria — add a Given / When / Then scenario');
   if (!r.source) out.push('No source stakeholder — choose who asked for it');
   if (r.type !== 'Business' && !(r.objectiveIds || []).length && p.objectives.length) out.push('Not traced to an objective — choose one under "Supports objectives"');
+  return out;
+}
+
+/** API specification checks: what a developer needs to build it without guessing. */
+export function lintApi(a, p) {
+  const out = [];
+  const codes = (a.codes || []).map((c) => String(c.code));
+  if (!a.summary) out.push('No summary');
+  if (!codes.some((c) => /^2/.test(c))) out.push('No success response code (2xx)');
+  if (!codes.some((c) => /^4/.test(c))) out.push('No client error codes (4xx) — what does a caller get when input is wrong?');
+  if (a.method === 'POST' && !codes.includes('201') && !codes.includes('200') && !codes.includes('202')) out.push('POST should return 201 Created (or 200 / 202)');
+  if (['POST', 'PUT', 'PATCH'].includes(a.method) && !a.request && !a.entity) out.push('No request body example or resource entity');
+  if (!a.auth) out.push('Security not specified');
+  const inPath = [...String(a.path || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+  const declared = (a.params || []).filter((x) => x.in === 'path').map((x) => x.name);
+  for (const n of inPath) if (!declared.includes(n)) out.push(`Path parameter {${n}} is not described`);
+  if (['POST', 'PATCH'].includes(a.method) && !a.idempotent && !/idempot|retry|duplicate/i.test(a.failure || '')) out.push('Say what happens on a retry: could a repeated request create a duplicate?');
+  if (!a.failure && !codes.includes('500') && !codes.includes('503')) out.push('No failure handling (timeouts, server errors, what the user sees)');
+  if (!(a.requirementIds || []).length && p.requirements.length) out.push('Not linked to a requirement');
+  return out;
+}
+
+/** Data mapping checks for a screen. */
+export function mappingIssues(scr, p) {
+  const out = [];
+  const known = new Set(p.entities.flatMap((e) => (e.fields || []).map((f) => `${e.name}.${f.name}`)));
+  const attr = (ref) => { const [en, fn] = String(ref).split('.'); return (p.entities.find((e) => e.name === en)?.fields || []).find((f) => f.name === fn); };
+  for (const f of scr.fields || []) {
+    if (f.control === 'Button' || f.control === 'Read-only') continue;
+    const label = f.label || 'Unnamed field';
+    if (!f.mapsTo) { out.push(`${label}: not mapped to where it is stored`); continue; }
+    if (!known.has(f.mapsTo)) { out.push(`${label}: ${f.mapsTo} no longer exists in the data model`); continue; }
+    const a = attr(f.mapsTo);
+    if (a?.required && !f.required) out.push(`${label}: stored in a required attribute (${f.mapsTo}) but optional on screen`);
+    const numeric = ['Number', 'Currency'].includes(f.control), isNum = ['int', 'decimal'].includes(a?.type);
+    if (numeric !== isNum && a?.type && !['enum', 'uuid'].includes(a.type) && f.control !== 'Dropdown') out.push(`${label}: ${f.control} control but ${f.mapsTo} is ${a.type}`);
+    if (f.control === 'Date' && a && !['date', 'datetime'].includes(a.type)) out.push(`${label}: Date control but ${f.mapsTo} is ${a.type}`);
+  }
+  if ((scr.fields || []).length && !(scr.fields || []).some((f) => f.control === 'Button')) out.push('No action button (how does the user submit?)');
+  return out;
+}
+
+/** Non-blocking suggestions that make a requirement easier to build and test. */
+export function suggestRequirement(r) {
+  const out = [];
+  const ac = r.acceptance || [];
+  const text = ac.map((a) => `${a.given} ${a.when} ${a.then}`).join(' ').toLowerCase();
+  if (r.type === 'Functional' && ac.length && !/(invalid|error|fail|reject|not |missing|unavailable|timeout|declin|exceed|duplicate|already|wrong|blank|empty|cancel)/.test(text)) out.push('Add an unhappy-path scenario: what should happen when the input is wrong, a rule is broken or a service is unavailable?');
+  if (r.type === 'Functional' && /\b(send|notify|email|sms|confirm)/i.test(r.statement || '') && !/fail|not deliver|bounce/.test(text)) out.push('If the notification cannot be delivered, does the main action still succeed? Say what the user sees.');
+  if (/\b(update|edit|change)\b/i.test(r.statement || '') && !/which|field/i.test(`${r.statement} ${text}`)) out.push('Which fields can be changed, and do any changes need verification?');
   return out;
 }
 
@@ -201,7 +260,7 @@ export const COLLECTIONS = {
   personas: {
     title: 'Personas & actors', singular: 'persona',
     intro: 'The kinds of users (and external systems) that interact with the solution.',
-    fields: [{ key: 'name', label: 'Name', req: true, ph: 'e.g. Loan applicant' }, { key: 'kind', label: 'Kind', type: 'select', options: ['Human', 'System'], blank: false }, { key: 'description', label: 'Description', type: 'textarea' }, { key: 'goals', label: 'Goals', type: 'list' }, { key: 'pains', label: 'Pain points', type: 'list' }],
+    fields: [{ key: 'name', label: 'Name', req: true, ph: 'e.g. Loan applicant' }, { key: 'kind', label: 'Kind', type: 'select', options: ['Human', 'System'], blank: false }, { key: 'parent', label: 'Is a kind of (generalisation)', type: 'select', options: o.personas, help: 'e.g. Super admin is a kind of Admin: it inherits all of Admin\'s use cases' }, { key: 'description', label: 'Description', type: 'textarea' }, { key: 'goals', label: 'Goals', type: 'list' }, { key: 'pains', label: 'Pain points', type: 'list' }],
     cols: [['Persona', (x) => b(x.name)], ['Kind', (x) => pill(x.kind)], ['Description', (x) => cut(x.description, 100)], ['Stories', (x, p) => String(p.stories.filter((s) => s.asA === x.id).length)]],
     defaults: () => ({ kind: 'Human', goals: [], pains: [] }),
   },
@@ -272,15 +331,16 @@ export const COLLECTIONS = {
       { key: 'main', label: 'Main success scenario (one step per line)', type: 'list', rows: 6 },
       { key: 'alt', label: 'Alternative flows (e.g. "3a. If … then …")', type: 'list', rows: 3 }, { key: 'exceptions', label: 'Exception flows', type: 'list', rows: 3 },
       { key: 'post', label: 'Postconditions (success guarantee)', type: 'list', rows: 2 },
-      { key: 'includes', label: 'Includes / extends other use cases', type: 'multi', options: (p) => p.usecases.map((u) => ({ value: u.id, label: `${u.code} ${u.name}` })) },
+      { key: 'includes', label: '«include» — always performs these use cases', type: 'multi', options: (p) => p.usecases.map((u) => ({ value: u.id, label: `${u.code} ${u.name}` })) },
+      { key: 'extends', label: '«extend» — optionally adds to these use cases', type: 'multi', options: (p) => p.usecases.map((u) => ({ value: u.id, label: `${u.code} ${u.name}` })) },
       { key: 'requirementIds', label: 'Related requirements', type: 'multi', options: o.requirements },
     ],
     cols: [['ID', (x) => b(x.code)], ['Use case', (x) => b(x.name)], ['Primary actor', (x, p) => cut(nameOf(p.personas, x.primary), 30)], ['Steps', (x) => String((x.main || []).length)], ['Alt / exc.', (x) => `${(x.alt || []).length} / ${(x.exceptions || []).length}`]],
-    defaults: () => ({ level: 'User goal', secondary: [], pre: [], main: [], alt: [], exceptions: [], post: [], includes: [], requirementIds: [] }),
+    defaults: () => ({ level: 'User goal', secondary: [], pre: [], main: [], alt: [], exceptions: [], post: [], includes: [], extends: [], requirementIds: [] }),
   },
   rules: {
     title: 'Business rules', singular: 'business rule', prefix: 'RULE', pad: 2,
-    fields: [{ key: 'code', label: 'ID' }, { key: 'name', label: 'Name', req: true }, { key: 'kind', label: 'Kind', type: 'select', options: ['Constraint', 'Computation', 'Inference', 'Action enabler', 'Fact'] }, { key: 'owner', label: 'Rule owner', type: 'select', options: o.stakeholders }, { key: 'statement', label: 'Rule statement', type: 'textarea', req: true }, { key: 'requirementIds', label: 'Enforced by requirements', type: 'multi', options: o.requirements }],
+    fields: [{ key: 'code', label: 'ID' }, { key: 'name', label: 'Name', req: true }, { key: 'kind', label: 'Kind', type: 'select', options: ['Constraint', 'Computation', 'Inference', 'Action enabler', 'Fact'] }, { key: 'decidedBy', label: 'Decided by', type: 'select', options: ['System (fully automated)', 'AI recommends, a person approves', 'AI decides (with monitoring)', 'Person (manual)'], help: 'Where AI is involved, say who is accountable and when a person must approve' }, { key: 'owner', label: 'Rule owner', type: 'select', options: o.stakeholders }, { key: 'statement', label: 'Rule statement', type: 'textarea', req: true }, { key: 'requirementIds', label: 'Enforced by requirements', type: 'multi', options: o.requirements }],
     cols: [['ID', (x) => b(x.code)], ['Rule', (x) => `${b(x.name)}<div class="muted small">${cut(x.statement, 120)}</div>`], ['Kind', (x) => pill(x.kind)], ['Requirements', (x, p) => codePills(p.requirements, x.requirementIds)]],
     defaults: () => ({ kind: 'Constraint', requirementIds: [] }),
   },
@@ -292,11 +352,11 @@ export const COLLECTIONS = {
     defaults: () => ({ conditions: [], actions: [], rows: [] }),
   },
   tests: {
-    title: 'Test cases (UAT)', singular: 'test case', prefix: 'TC',
-    fields: [{ key: 'code', label: 'ID' }, { key: 'title', label: 'Title', req: true }, { key: 'requirementIds', label: 'Verifies requirements', type: 'multi', options: o.requirements }, { key: 'storyIds', label: 'Verifies stories', type: 'multi', options: o.stories }, { key: 'pre', label: 'Preconditions', type: 'textarea', rows: 2 }, { key: 'steps', label: 'Steps (one per line)', type: 'list' }, { key: 'expected', label: 'Expected result', type: 'textarea' }, { key: 'status', label: 'Status', type: 'select', options: TEST_STATUS, blank: false }, { key: 'tester', label: 'Tester', type: 'select', options: o.stakeholders }, { key: 'actual', label: 'Actual result / defect ref', type: 'textarea', rows: 2 }],
-    cols: [['ID', (x) => b(x.code)], ['Test', (x) => b(x.title)], ['Verifies', (x, p) => codePills(p.requirements, x.requirementIds)], ['Steps', (x) => String((x.steps || []).length)], ['Status', (x) => autoPill(x.status)]],
-    defaults: () => ({ status: 'Not run', requirementIds: [], storyIds: [], steps: [] }),
-    filters: { status: TEST_STATUS },
+    title: 'Test cases (SIT / UAT)', singular: 'test case', prefix: 'TC',
+    fields: [{ key: 'code', label: 'ID' }, { key: 'title', label: 'Title', req: true }, { key: 'level', label: 'Test level', type: 'select', options: TEST_LEVELS, help: 'SIT tests the systems working together; UAT is the business confirming it meets their needs' }, { key: 'requirementIds', label: 'Verifies requirements', type: 'multi', options: o.requirements }, { key: 'storyIds', label: 'Verifies stories', type: 'multi', options: o.stories }, { key: 'pre', label: 'Preconditions', type: 'textarea', rows: 2 }, { key: 'steps', label: 'Steps (one per line)', type: 'list' }, { key: 'expected', label: 'Expected result', type: 'textarea' }, { key: 'status', label: 'Status', type: 'select', options: TEST_STATUS, blank: false }, { key: 'tester', label: 'Tester', type: 'select', options: o.stakeholders }, { key: 'actual', label: 'Actual result / defect ref', type: 'textarea', rows: 2 }],
+    cols: [['ID', (x) => b(x.code)], ['Test', (x) => b(x.title)], ['Verifies', (x, p) => codePills(p.requirements, x.requirementIds)], ['Level', (x) => pill((/\((\w+)\)/.exec(x.level || '') || [])[1] || x.level || '—')], ['Steps', (x) => String((x.steps || []).length)], ['Status', (x) => autoPill(x.status)], ['Defects', (x, p) => codePills(p.defects, p.defects.filter((d) => d.testId === x.id).map((d) => d.id))]],
+    defaults: () => ({ status: 'Not run', level: 'User acceptance (UAT)', requirementIds: [], storyIds: [], steps: [] }),
+    filters: { status: TEST_STATUS, level: TEST_LEVELS },
   },
   processes: {
     title: 'Process models', singular: 'process',
@@ -319,6 +379,7 @@ export const COLLECTIONS = {
       { key: 'name', label: 'Entity (singular, PascalCase)', req: true }, { key: 'owner', label: 'Data owner', type: 'select', options: o.stakeholders },
       { key: 'area', label: 'Area / subject (optional)', ph: 'e.g. Customer, Lending, Payments', help: 'Big data models are drawn one area per diagram' },
       { key: 'description', label: 'Description', type: 'textarea', rows: 2 }, { key: 'classification', label: 'Classification', type: 'select', options: ['Public', 'Internal', 'Confidential', 'Personal (PII)', 'Sensitive'] }, { key: 'retention', label: 'Retention', ph: 'e.g. 7 years' },
+      { key: 'operations', label: 'Operations (optional, one per line, e.g. submit(), approve(reason))', type: 'list', rows: 2 },
       { key: 'fields', label: 'Attributes', type: 'rows', add: 'Add attribute', cols: [{ key: 'name', label: 'Name' }, { key: 'type', label: 'Type', type: 'select', options: FIELD_TYPES, w: '110px' }, { key: 'pk', label: 'PK', type: 'check', w: '36px' }, { key: 'required', label: 'Req', type: 'check', w: '36px' }, { key: 'unique', label: 'Uniq', type: 'check', w: '40px' }, { key: 'fk', label: 'References', type: 'select', options: o.entityNames, w: '130px' }, { key: 'desc', label: 'Description / validation', w: '1.4fr' }],
         newRow: (rows) => (rows.length ? { type: 'string' } : { name: 'id', type: 'uuid', pk: true, required: true, unique: true }) },
     ],
@@ -327,36 +388,40 @@ export const COLLECTIONS = {
   },
   relationships: {
     title: 'Relationships', singular: 'relationship',
-    fields: [{ key: 'from', label: 'From entity', type: 'select', options: o.entities, req: true }, { key: 'card', label: 'Cardinality', type: 'select', options: CARDS, req: true }, { key: 'to', label: 'To entity', type: 'select', options: o.entities, req: true }, { key: 'label', label: 'Verb', ph: 'e.g. submits' }],
+    fields: [{ key: 'from', label: 'From entity', type: 'select', options: o.entities, req: true }, { key: 'kind', label: 'Kind (UML)', type: 'select', options: REL_KINDS, blank: false, help: 'Aggregation: parts can exist alone. Composition: parts die with the whole (from = whole). Generalisation: from = parent, to = child' }, { key: 'card', label: 'Cardinality', type: 'select', options: CARDS, req: true }, { key: 'to', label: 'To entity', type: 'select', options: o.entities, req: true }, { key: 'label', label: 'Verb', ph: 'e.g. submits' }],
     cols: [['From', (x, p) => b(nameOf(p.entities, x.from))], ['Cardinality', (x) => pill(x.card)], ['To', (x, p) => b(nameOf(p.entities, x.to))], ['Meaning', (x) => cut(x.label)]],
-    defaults: () => ({ card: 'one-to-many' }),
+    defaults: () => ({ card: 'one-to-many', kind: 'association' }),
+    validate: (x) => (x.from && x.from === x.to && x.kind === 'generalisation' ? 'An entity cannot be a kind of itself' : ''),
   },
   states: {
     title: 'State machines', singular: 'state machine',
     intro: 'Lifecycle of a business object (e.g. an Application). Generates a state diagram.',
-    fields: [{ key: 'name', label: 'Name', req: true }, { key: 'entity', label: 'Entity', type: 'select', options: o.entities }, { key: 'initial', label: 'Initial state', req: true }, { key: 'finals', label: 'Final states', type: 'list', rows: 2 }, { key: 'transitions', label: 'Transitions', type: 'rows', add: 'Add transition', cols: [{ key: 'from', label: 'From state' }, { key: 'to', label: 'To state' }, { key: 'event', label: 'Event / trigger', w: '1.3fr' }, { key: 'guard', label: 'Guard condition' }] }],
+    fields: [{ key: 'name', label: 'Name', req: true }, { key: 'entity', label: 'Entity', type: 'select', options: o.entities }, { key: 'initial', label: 'Initial state', req: true }, { key: 'finals', label: 'Final states', type: 'list', rows: 2 }, { key: 'transitions', label: 'Transitions', type: 'rows', add: 'Add transition', cols: [{ key: 'from', label: 'From state' }, { key: 'to', label: 'To state' }, { key: 'event', label: 'Event / trigger', w: '1.3fr' }, { key: 'guard', label: 'Guard [condition]' }, { key: 'action', label: '/ Action (effect)' }] }],
     cols: [['State machine', (x) => b(x.name)], ['Entity', (x, p) => cut(nameOf(p.entities, x.entity), 30)], ['States', (x) => String(new Set((x.transitions || []).flatMap((t) => [t.from, t.to]).filter(Boolean)).size)], ['Transitions', (x) => String((x.transitions || []).length)]],
     defaults: () => ({ finals: [], transitions: [] }),
   },
   apis: {
     title: 'API endpoints', singular: 'endpoint',
+    links: [['#/settings', 'Export OpenAPI / Postman'], ['#/docs/api', 'API specification']],
     intro: 'Interface specification for developers. Exports an OpenAPI 3.0 file.',
     fields: [
       { key: 'method', label: 'Method', type: 'select', options: METHODS, blank: false, req: true }, { key: 'path', label: 'Path', req: true, ph: '/applications/{id}' },
       { key: 'summary', label: 'Summary', req: true, full: true }, { key: 'tag', label: 'Group / tag' }, { key: 'auth', label: 'Security', type: 'select', options: ['None', 'API key', 'OAuth2 / JWT bearer', 'mTLS'] },
       { key: 'params', label: 'Parameters', type: 'rows', add: 'Add parameter', cols: [{ key: 'name', label: 'Name' }, { key: 'in', label: 'In', type: 'select', options: ['path', 'query', 'header'], w: '100px' }, { key: 'type', label: 'Type', type: 'select', options: ['string', 'integer', 'number', 'boolean'], w: '110px' }, { key: 'required', label: 'Req', type: 'check', w: '40px' }, { key: 'desc', label: 'Description', w: '1.4fr' }] },
+      { key: 'entity', label: 'Resource (entity)', type: 'select', options: o.entities, help: 'Used to generate JSON and XML examples when the boxes below are empty' }, { key: 'version', label: 'Version', ph: 'v1' },
       { key: 'request', label: 'Request body example (JSON)', type: 'textarea', rows: 4 }, { key: 'response', label: 'Success response example (JSON)', type: 'textarea', rows: 4 },
       { key: 'codes', label: 'Response codes', type: 'rows', add: 'Add response code', cols: [{ key: 'code', label: 'Code', w: '80px' }, { key: 'desc', label: 'Meaning', w: '2fr' }] },
+      { key: 'idempotent', label: 'Safe to retry', type: 'check', text: 'Idempotent: repeating the same request does not create duplicates' }, { key: 'failure', label: 'Failure handling (timeouts, retries, duplicates, what the user sees)', type: 'textarea', rows: 3, ph: 'e.g. Time out after 10 s; retry twice with the same Idempotency-Key; if still failing, mark as Pending and alert support' },
       { key: 'requirementIds', label: 'Implements requirements', type: 'multi', options: o.requirements },
     ],
-    cols: [['Method', (x) => pill(x.method, { GET: 'info', POST: 'ok', DELETE: 'err', PUT: 'warn', PATCH: 'warn' }[x.method])], ['Path', (x) => `<code>${esc(x.path)}</code>`], ['Summary', (x) => cut(x.summary, 80)], ['Auth', (x) => cut(x.auth, 20)], ['Codes', (x) => esc((x.codes || []).map((c) => c.code).join(', ')) || '—']],
-    defaults: () => ({ method: 'GET', auth: 'OAuth2 / JWT bearer', params: [], codes: [{ code: '200', desc: 'OK' }], requirementIds: [] }),
+    cols: [['Method', (x) => pill(x.method, { GET: 'info', POST: 'ok', DELETE: 'err', PUT: 'warn', PATCH: 'warn' }[x.method])], ['Path', (x) => `<code>${esc(x.path)}</code>`], ['Summary', (x) => cut(x.summary, 80)], ['Auth', (x) => cut(x.auth, 20)], ['Codes', (x) => esc((x.codes || []).map((c) => c.code).join(', ')) || '—'], ['Quality', (x, p) => { const l = lintApi(x, p); return l.length ? `<span class="pill warn" title="${esc(l.join('\n'))}">${l.length} issue${l.length > 1 ? 's' : ''}</span>` : pill('OK', 'ok'); }]],
+    defaults: () => ({ method: 'GET', auth: 'OAuth2 / JWT bearer', version: 'v1', params: [], codes: [{ code: '200', desc: 'OK — request succeeded' }, { code: '400', desc: 'Bad request — validation failed (field errors returned)' }, { code: '401', desc: 'Unauthorised — missing or invalid credentials' }, { code: '404', desc: 'Not found' }, { code: '500', desc: 'Server error — try again later' }], requirementIds: [] }),
   },
   integrations: {
     title: 'Integrations', singular: 'integration',
-    fields: [{ key: 'system', label: 'External system', req: true }, { key: 'direction', label: 'Direction', type: 'select', options: ['Outbound', 'Inbound', 'Two-way'] }, { key: 'protocol', label: 'Protocol', type: 'select', options: ['REST', 'SOAP', 'GraphQL', 'Message queue', 'Webhook', 'SFTP / file', 'Database', 'Other'] }, { key: 'frequency', label: 'Frequency', ph: 'Real-time / nightly batch' }, { key: 'data', label: 'Data exchanged', type: 'textarea', req: true }, { key: 'auth', label: 'Authentication' }, { key: 'owner', label: 'Owner', type: 'select', options: o.stakeholders }, { key: 'sla', label: 'SLA / error handling', type: 'textarea', rows: 2 }],
+    fields: [{ key: 'system', label: 'External system', req: true }, { key: 'direction', label: 'Direction', type: 'select', options: ['Outbound', 'Inbound', 'Two-way'] }, { key: 'protocol', label: 'Protocol', type: 'select', options: ['REST', 'SOAP', 'GraphQL', 'Message queue', 'Webhook', 'SFTP / file', 'Database', 'Other'] }, { key: 'frequency', label: 'Frequency', ph: 'Real-time / nightly batch' }, { key: 'data', label: 'Data exchanged', type: 'textarea', req: true }, { key: 'auth', label: 'Authentication' }, { key: 'owner', label: 'Owner', type: 'select', options: o.stakeholders }, { key: 'sla', label: 'SLA / error handling', type: 'textarea', rows: 2 }, { key: 'state', label: 'Landscape', type: 'select', options: ['Existing and kept', 'To-be (new)', 'As-is (to retire)'] }, { key: 'mapping', label: 'Field mapping', type: 'rows', add: 'Add mapping', cols: [{ key: 'source', label: 'Source field (their system)' }, { key: 'target', label: 'Target (our Entity.attribute)', type: 'select', options: o.attributes, w: '1.2fr' }, { key: 'rule', label: 'Transformation / rule', w: '1.4fr' }] }],
     cols: [['System', (x) => b(x.system)], ['Direction', (x) => pill(x.direction)], ['Protocol', (x) => pill(x.protocol, 'info')], ['Data', (x) => cut(x.data, 80)], ['Frequency', (x) => cut(x.frequency, 30)]],
-    defaults: () => ({ direction: 'Outbound', protocol: 'REST' }),
+    defaults: () => ({ direction: 'Outbound', protocol: 'REST', state: 'Existing and kept', mapping: [] }),
   },
   raid: {
     title: 'RAID log', singular: 'RAID item', codeFrom: (x) => ({ Risk: 'R', Assumption: 'A', Issue: 'I', Dependency: 'D' })[x.type] || 'R', pad: 2,
@@ -411,6 +476,62 @@ export const COLLECTIONS = {
       if (+x.pessimistic && +x.likely && +x.pessimistic < +x.likely) return 'Pessimistic must not be less than most likely';
       return '';
     },
+  },
+  screens: {
+    title: 'Screens & data mapping', singular: 'screen', prefix: 'SCR', pad: 2,
+    links: [['#/diagrams/dataflow', 'Data flow diagrams'], ['#/docs/mapping', 'Data mapping document']],
+    intro: 'Each screen, its fields, and where every field is stored (Entity.attribute). This is the data mapping developers and testers need: from what the user sees to the database.',
+    fields: [
+      { key: 'code', label: 'ID' }, { key: 'name', label: 'Screen name', req: true, ph: 'e.g. Registration' },
+      { key: 'persona', label: 'Used by', type: 'select', options: o.personas }, { key: 'usecaseIds', label: 'Supports use cases', type: 'multi', options: o.usecases },
+      { key: 'purpose', label: 'Purpose', type: 'textarea', rows: 2, full: true },
+      { key: 'apiIds', label: 'Calls API endpoints', type: 'multi', options: o.apis },
+      { key: 'fields', label: 'Fields', type: 'rows', add: 'Add field', cols: [{ key: 'label', label: 'Label on screen', w: '1.2fr' }, { key: 'control', label: 'Control', type: 'select', options: CONTROLS, w: '120px' }, { key: 'required', label: 'Req', type: 'check', w: '40px' }, { key: 'validation', label: 'Validation / format', w: '1.3fr' }, { key: 'mapsTo', label: 'Stored in (Entity.attribute)', type: 'select', options: o.attributes, w: '1.4fr' }] },
+      { key: 'notes', label: 'Notes (messages, states, wireframe link)', type: 'textarea', rows: 2 },
+    ],
+    cols: [['ID', (x) => b(x.code)], ['Screen', (x, p) => `${b(x.name)}<div class="muted small">${cut(nameOf(p.personas, x.persona), 40)}</div>`], ['Fields', (x) => String((x.fields || []).length)], ['Mapping', (x, p) => { const m = mappingIssues(x, p); const inputs = (x.fields || []).filter((f) => f.control !== 'Button').length; return m.length ? `<span class="pill warn" title="${esc(m.join('\n'))}">${m.length} to fix</span>` : inputs ? pill(`${inputs}/${inputs} mapped`, 'ok') : '—'; }]],
+    defaults: () => ({ usecaseIds: [], apiIds: [], fields: [] }),
+  },
+  components: {
+    title: 'Architecture components', singular: 'component', prefix: 'CMP', pad: 2,
+    links: [['#/diagrams/arch-asis', 'As-is landscape'], ['#/diagrams/arch-tobe', 'To-be landscape'], ['#/diagrams/arch-layers', 'Layers'], ['#/docs/architecture', 'Architecture document']],
+    intro: 'The systems and parts of the solution, the layer each sits in, and how they connect — today (as-is) and after the change (to-be). Drives the layered architecture and landscape diagrams.',
+    fields: [
+      { key: 'code', label: 'ID' }, { key: 'name', label: 'Component / system', req: true, ph: 'e.g. Mobile app, Order service, Inventory DB' },
+      { key: 'layer', label: 'Layer', type: 'select', options: LAYERS, blank: false }, { key: 'state', label: 'Landscape', type: 'select', options: ['Existing and kept', 'To-be (new)', 'As-is (to retire)'], blank: false },
+      { key: 'technology', label: 'Technology / product', ph: 'e.g. React, Java service, PostgreSQL, SAP' }, { key: 'owner', label: 'Owner', type: 'select', options: o.stakeholders },
+      { key: 'description', label: 'Responsibility', type: 'textarea', rows: 2, full: true },
+      { key: 'connections', label: 'Connections from this component', type: 'rows', add: 'Add connection', cols: [{ key: 'to', label: 'To', type: 'select', options: o.components }, { key: 'method', label: 'How', type: 'select', options: ['REST API', 'SOAP API', 'GraphQL', 'Event / message', 'File transfer', 'Database link', 'Manual (spreadsheet / re-keying)'], w: '1.2fr' }, { key: 'frequency', label: 'When', ph: 'Real-time / daily', w: '110px' }, { key: 'data', label: 'Data', w: '1.2fr' }, { key: 'state', label: 'Landscape', type: 'select', options: ['Both', 'As-is only', 'To-be only'], w: '110px' }] },
+    ],
+    cols: [['ID', (x) => b(x.code)], ['Component', (x) => `${b(x.name)}<div class="muted small">${cut(x.technology, 50)}</div>`], ['Layer', (x) => pill(x.layer || '—')], ['Landscape', (x) => pill(x.state || '—', /new/.test(x.state) ? 'ok' : /retire/.test(x.state) ? 'err' : '')], ['Connections', (x) => String((x.connections || []).length)]],
+    defaults: () => ({ layer: 'Business logic / services', state: 'Existing and kept', connections: [] }),
+    filters: { layer: LAYERS },
+  },
+  queries: {
+    title: 'Saved SQL queries', singular: 'query', prefix: 'Q', pad: 2,
+    links: [['#/sql', 'Open the SQL workbench']],
+    intro: 'SQL you used to explore data or prove a requirement. Run them in the SQL workbench.',
+    fields: [{ key: 'code', label: 'ID' }, { key: 'name', label: 'Name', req: true }, { key: 'purpose', label: 'What it answers / checks', type: 'textarea', rows: 2 }, { key: 'sql', label: 'SQL', type: 'textarea', rows: 8, req: true }, { key: 'requirementIds', label: 'Validates requirements', type: 'multi', options: o.requirements }],
+    cols: [['ID', (x) => b(x.code)], ['Query', (x) => `${b(x.name)}<div class="muted small">${cut(x.purpose, 90)}</div>`], ['Requirements', (x, p) => codePills(p.requirements, x.requirementIds)], ['', (x) => `<button class="btn sm" data-runq="${esc(x.id)}">Run ▶</button>`]],
+    defaults: () => ({ requirementIds: [] }),
+  },
+  defects: {
+    title: 'Defect log', singular: 'defect', prefix: 'DEF',
+    links: [['#/c/tests', 'Test cases'], ['#/docs/uat', 'UAT plan & results']],
+    intro: 'Problems found in testing. A good defect says what was done, what was expected, what actually happened, and how bad it is — facts, not guesses about the cause.',
+    fields: [
+      { key: 'code', label: 'ID' }, { key: 'title', label: 'Title', req: true, full: true, ph: 'Short, specific: “Submit stays enabled when amount is above the maximum”' },
+      { key: 'testId', label: 'Found by test case', type: 'select', options: o.tests }, { key: 'environment', label: 'Environment', type: 'select', options: ['Development', 'SIT', 'UAT', 'Production'] },
+      { key: 'severity', label: 'Severity (impact)', type: 'select', options: ['Critical', 'High', 'Medium', 'Low'], req: true }, { key: 'priority', label: 'Priority (urgency)', type: 'select', options: ['P1 — fix now', 'P2 — this release', 'P3 — next release', 'P4 — when possible'] },
+      { key: 'steps', label: 'Steps to reproduce (one per line)', type: 'list', rows: 4 },
+      { key: 'expected', label: 'Expected result', type: 'textarea', rows: 2, req: true }, { key: 'actual', label: 'Actual result', type: 'textarea', rows: 2, req: true },
+      { key: 'status', label: 'Status', type: 'select', options: ['New', 'Open', 'In progress', 'Fixed — ready to retest', 'Closed', 'Rejected', 'Deferred'], blank: false },
+      { key: 'reportedBy', label: 'Reported by', type: 'select', options: o.stakeholders }, { key: 'assignee', label: 'Assigned to' }, { key: 'date', label: 'Found on', type: 'date' },
+      { key: 'requirementIds', label: 'Affects requirements', type: 'multi', options: o.requirements }, { key: 'notes', label: 'Notes / root cause / fix', type: 'textarea', rows: 2 },
+    ],
+    cols: [['ID', (x) => b(x.code)], ['Defect', (x, p) => `${b(x.title)}<div class="muted small">${cut(byId(p.tests, x.testId)?.code || '', 20)} ${esc(x.environment || '')}</div>`], ['Severity', (x) => pill(x.severity || '—', { Critical: 'err', High: 'err', Medium: 'warn', Low: 'ok' }[x.severity])], ['Priority', (x) => cut(String(x.priority || '').split(' ')[0], 4)], ['Status', (x) => autoPill(x.status)]],
+    defaults: () => ({ status: 'New', environment: 'UAT', severity: 'Medium', priority: 'P2 — this release', requirementIds: [], steps: [], date: today() }),
+    filters: { status: ['New', 'Open', 'In progress', 'Fixed — ready to retest', 'Closed', 'Rejected', 'Deferred'], severity: ['Critical', 'High', 'Medium', 'Low'] },
   },
   glossary: {
     title: 'Glossary', singular: 'term',

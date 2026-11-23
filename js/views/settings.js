@@ -2,7 +2,7 @@
 import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings } from '../store.js';
 import { esc, $, $$, toast, download, pickFile, fileSafe, confirmBox } from '../ui.js';
 import { COLLECTIONS, uid, ensureCode, normalize } from '../model.js';
-import { openApi, sqlDdl, jsonSchemas, rtmCsv, toCsv } from '../gen/exports.js';
+import { openApi, sqlDdl, jsonSchemas, rtmCsv, toCsv, postmanCollection } from '../gen/exports.js';
 import { DOC_LIST, buildDoc } from '../gen/docs.js';
 import { allDiagrams } from '../gen/diagrams.js';
 import { exportSvg } from './canvas.js';
@@ -74,6 +74,7 @@ async function zipAll(p, onStep) {
   for (const dg of allDiagrams(p)) zip.file(`diagrams/${fileSafe(dg.title)}.mmd`, dg.code);
   for (const c of p.canvases) zip.file(`diagrams/whiteboard_${fileSafe(c.name)}.svg`, exportSvg(c));
   zip.file('technical/openapi.yaml', openApi(p));
+  zip.file('technical/postman_collection.json', JSON.stringify(postmanCollection(p), null, 2));
   zip.file('technical/schema.sql', sqlDdl(p));
   zip.file('technical/json-schemas.json', jsonSchemas(p));
   zip.file('technical/traceability_matrix.csv', rtmCsv(p));
@@ -100,6 +101,7 @@ export function renderSettings(root) {
         <button class="btn primary" data-zip>Complete pack (.zip)</button>
         <button class="btn" data-json>Project file (.json)</button>
         <button class="btn" data-oas>OpenAPI 3.0 (.yaml)</button>
+        <button class="btn" data-postman>Postman collection (.json)</button>
         <button class="btn" data-sql>Database DDL (.sql)</button>
         <button class="btn" data-jss>JSON Schemas (.json)</button>
         <button class="btn" data-rtm>Traceability matrix (.csv)</button>
@@ -147,6 +149,7 @@ export function renderSettings(root) {
   }));
   $('[data-json]', root).onclick = () => download(JSON.stringify(p, null, 2), `${code}.babuilder.json`, 'application/json');
   $('[data-oas]', root).onclick = () => download(openApi(p), `${code}_openapi.yaml`, 'application/yaml');
+  $('[data-postman]', root).onclick = () => download(JSON.stringify(postmanCollection(p), null, 2), `${code}.postman_collection.json`, 'application/json');
   $('[data-sql]', root).onclick = () => download(sqlDdl(p), `${code}_schema.sql`, 'application/sql');
   $('[data-jss]', root).onclick = () => download(jsonSchemas(p), `${code}_schemas.json`, 'application/json');
   $('[data-rtm]', root).onclick = () => download(rtmCsv(p), `${code}_RTM.csv`, 'text/csv');

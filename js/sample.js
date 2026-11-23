@@ -77,6 +77,7 @@ export function sampleProject() {
       { id: 'p2', name: 'Credit Officer', kind: 'Human', description: 'Reviews applications that are referred by the rules engine.', goals: ['Clear queue within SLA'], pains: ['Missing documents'] },
       { id: 'p3', name: 'Credit Bureau', kind: 'System', description: 'External bureau providing credit reports and scores.' },
       { id: 'p4', name: 'Core Banking', kind: 'System', description: 'System of record for loan accounts.' },
+      { id: 'p5', name: 'Senior Credit Officer', kind: 'Human', parent: 'p2', description: 'Credit officer with a higher mandate who can override declines.', goals: ['Fair, consistent overrides'], pains: [] },
     ],
     elicitation: [
       { id: 'e1', code: 'EL-01', date: '2026-10-05', technique: 'Interview', title: 'Sponsor vision interview', participants: ['s1'], agenda: ['Business drivers', 'Success measures', 'Constraints'], notes: 'Sponsor wants to launch before the festive season. Decision speed is the main differentiator.', outcomes: ['Target decision time < 10 minutes', 'Loan limit R 250 000 for phase 1'], actions: [{ action: 'Share competitor benchmark', owner: 's1', due: '2026-10-12', done: true }] },
@@ -108,6 +109,8 @@ export function sampleProject() {
     usecases: [
       { id: 'u1', code: 'UC-01', name: 'Submit loan application', primary: 'p1', secondary: ['p3'], level: 'User goal', goal: 'The applicant applies for a personal loan and receives a decision.', trigger: 'Applicant selects "Apply for a personal loan".', pre: ['Applicant is signed in to internet banking', 'Applicant is 18 or older'], main: ['Applicant enters amount and term', 'System shows the monthly repayment', 'Applicant confirms personal, employment and income details', 'Applicant accepts the credit check consent', 'System requests a credit report from the Credit Bureau', 'System applies the decision rules', 'System displays the decision and next steps'], alt: ['5a. Bureau unavailable: system refers the application and informs the applicant', '6a. Outcome is Refer: application goes to the credit officer queue'], exceptions: ['1a. Amount outside limits: system shows the allowed range'], post: ['Application stored with a decision and audit trail'], includes: [], requirementIds: ['r3', 'r4'] },
       { id: 'u2', code: 'UC-02', name: 'Review referred application', primary: 'p2', secondary: [], level: 'User goal', goal: 'Credit officer decides a referred application.', trigger: 'Application enters the referral queue.', pre: ['Officer has the credit officer role'], main: ['Officer opens the next application in the queue', 'System shows application, bureau report and rule results', 'Officer approves or declines with a reason', 'System notifies the applicant'], alt: ['2a. Documents missing: officer requests documents; application is paused'], exceptions: [], post: ['Decision recorded with officer ID and reason'], includes: [], requirementIds: ['r5'] },
+      { id: 'u3', code: 'UC-03', name: 'Get help with the application', primary: 'p1', secondary: [], level: 'Sub-function', goal: 'The applicant gets help while applying without losing their progress.', trigger: 'Applicant selects Help on any application screen.', pre: ['An application is in progress'], main: ['Applicant selects Help', 'System shows help for the current step', 'Applicant returns to the application'], alt: [], exceptions: [], post: ['Application data is kept'], includes: [], extends: ['u1'], requirementIds: [] },
+      { id: 'u4', code: 'UC-04', name: 'Override a declined application', primary: 'p5', secondary: [], level: 'User goal', goal: 'A senior credit officer overrides a decline with a recorded reason.', trigger: 'Customer appeals a decline.', pre: ['Officer has the senior credit officer role'], main: ['Officer opens the declined application', 'System shows the decline reasons and rule results', 'Officer approves with an override reason', 'System records the override for audit', 'System notifies the applicant'], alt: ['3a. Override reason missing: system asks for a reason'], exceptions: [], post: ['Override recorded with officer and reason'], includes: [], extends: [], requirementIds: [] },
     ],
     rules: [
       { code: 'RULE-01', name: 'Maximum loan amount', kind: 'Constraint', owner: 's2', statement: 'A personal loan must be between R 5 000 and R 250 000.', requirementIds: ['r3'] },
@@ -118,9 +121,9 @@ export function sampleProject() {
       { code: 'DT-01', name: 'Credit decision', conditions: ['Bureau score >= 650', 'Affordability met (RULE-02)', 'Existing arrears'], actions: ['Approve', 'Refer', 'Decline'], rows: [{ when: 'Y, Y, N', then: 'X, -, -' }, { when: 'Y, Y, Y', then: '-, X, -' }, { when: 'Y, N, -', then: '-, X, -' }, { when: 'N, -, -', then: '-, -, X' }], notes: 'Agreed in workshop EL-02. Rows are evaluated top to bottom.' },
     ],
     tests: [
-      { code: 'TC-001', title: 'Submit valid application', requirementIds: ['r3'], storyIds: ['st1'], pre: 'Signed-in test customer', steps: ['Open loan application', 'Enter R 50 000 over 36 months', 'Complete details and submit'], expected: 'Reference number shown; status Submitted', status: 'Passed', tester: 's3' },
-      { code: 'TC-002', title: 'Amount above maximum', requirementIds: ['r3'], storyIds: [], pre: 'Signed-in test customer', steps: ['Enter R 300 000', 'Try to submit'], expected: 'Validation message; cannot submit', status: 'Failed', tester: 's3', actual: 'Message shown but submit button still enabled — defect DEF-14' },
-      { code: 'TC-003', title: 'Automated approval', requirementIds: ['r4'], storyIds: ['st3'], pre: 'Bureau stub returns score 720', steps: ['Submit application'], expected: 'Decision Approve within 60 s', status: 'Not run' },
+      { id: 'tc1', level: 'User acceptance (UAT)', code: 'TC-001', title: 'Submit valid application', requirementIds: ['r3'], storyIds: ['st1'], pre: 'Signed-in test customer', steps: ['Open loan application', 'Enter R 50 000 over 36 months', 'Complete details and submit'], expected: 'Reference number shown; status Submitted', status: 'Passed', tester: 's3' },
+      { id: 'tc2', level: 'User acceptance (UAT)', code: 'TC-002', title: 'Amount above maximum', requirementIds: ['r3'], storyIds: [], pre: 'Signed-in test customer', steps: ['Enter R 300 000', 'Try to submit'], expected: 'Validation message; cannot submit', status: 'Failed', tester: 's3', actual: 'Message shown but submit button still enabled — defect DEF-14' },
+      { level: 'Integration (SIT)', code: 'TC-003', title: 'Automated approval', requirementIds: ['r4'], storyIds: ['st3'], pre: 'Bureau stub returns score 720', steps: ['Submit application'], expected: 'Decision Approve within 60 s', status: 'Not run' },
     ],
     processes: [
       { id: 'pr1', name: 'Personal loan application (as-is)', state: 'As-is', owner: 's3', description: 'Current branch-based process.', steps: [
@@ -139,8 +142,13 @@ export function sampleProject() {
         { id: 'S4', kind: 'decision', label: 'Auto-approve?', lane: 'System', yes: 'S7', no: 'S5' },
         { id: 'S5', kind: 'task', label: 'Review referred application', lane: 'Credit officer' },
         { id: 'S6', kind: 'decision', label: 'Approve?', lane: 'Credit officer', yes: 'S7', no: 'S8' },
-        { id: 'S7', kind: 'end', label: 'E-sign and disburse', lane: 'System' },
+        { id: 'S7', kind: 'task', label: 'E-sign the loan agreement', lane: 'Applicant', next: 'S9' },
         { id: 'S8', kind: 'end', label: 'Notify decline', lane: 'System' },
+        { id: 'S9', kind: 'fork', label: 'In parallel', lane: 'System', next: 'S10, S11' },
+        { id: 'S10', kind: 'task', label: 'Open loan account in Core Banking', lane: 'System', next: 'S12' },
+        { id: 'S11', kind: 'message', label: 'Send welcome email', lane: 'System', next: 'S12' },
+        { id: 'S12', kind: 'join', label: 'Both done', lane: 'System', next: 'S13' },
+        { id: 'S13', kind: 'end', label: 'Funds disbursed', lane: 'System' },
       ] },
     ],
     entities: [
@@ -150,9 +158,9 @@ export function sampleProject() {
       { id: 'en4', name: 'Document', classification: 'Personal (PII)', retention: '5 years', description: 'Uploaded supporting document', fields: [{ name: 'id', type: 'uuid', pk: true, required: true, unique: true }, { name: 'applicationId', type: 'uuid', required: true, fk: 'Application' }, { name: 'kind', type: 'enum', desc: 'Payslip, Bank statement, ID' }, { name: 'storageKey', type: 'string', required: true }] },
     ],
     relationships: [
-      { from: 'en1', to: 'en2', card: 'one-to-many', label: 'submits' },
-      { from: 'en2', to: 'en3', card: 'one-to-many', label: 'is checked by' },
-      { from: 'en2', to: 'en4', card: 'one-to-many', label: 'has' },
+      { from: 'en1', to: 'en2', card: 'one-to-many', kind: 'association', label: 'submits' },
+      { from: 'en2', to: 'en3', card: 'one-to-many', kind: 'association', label: 'is checked by' },
+      { from: 'en2', to: 'en4', card: 'one-to-many', kind: 'composition', label: 'has' },
     ],
     states: [
       { name: 'Application lifecycle', entity: 'en2', initial: 'Draft', finals: ['Disbursed', 'Declined', 'Withdrawn'], transitions: [
@@ -163,13 +171,13 @@ export function sampleProject() {
       ] },
     ],
     apis: [
-      { method: 'POST', path: '/applications', summary: 'Submit a loan application', tag: 'Applications', auth: 'OAuth2 / JWT bearer', params: [], request: '{\n  "amount": 50000,\n  "termMonths": 36,\n  "income": 32000\n}', response: '{\n  "id": "9b1c…",\n  "reference": "DLO-104233",\n  "status": "Submitted"\n}', codes: [{ code: '201', desc: 'Created' }, { code: '400', desc: 'Validation failed' }, { code: '401', desc: 'Not signed in' }], requirementIds: ['r3'] },
-      { method: 'GET', path: '/applications/{id}', summary: 'Get application status and decision', tag: 'Applications', auth: 'OAuth2 / JWT bearer', params: [{ name: 'id', in: 'path', type: 'string', required: true, desc: 'Application ID' }], request: '', response: '{\n  "id": "9b1c…",\n  "status": "Approved",\n  "decisionAt": "2027-02-01T10:22:00Z"\n}', codes: [{ code: '200', desc: 'OK' }, { code: '404', desc: 'Not found' }], requirementIds: ['r4'] },
-      { method: 'GET', path: '/referrals', summary: 'List referred applications for review', tag: 'Back office', auth: 'OAuth2 / JWT bearer', params: [{ name: 'page', in: 'query', type: 'integer', desc: 'Page number' }], request: '', response: '[ { "id": "…", "submittedAt": "…" } ]', codes: [{ code: '200', desc: 'OK' }, { code: '403', desc: 'Not a credit officer' }], requirementIds: ['r5'] },
+      { id: 'api1', entity: 'en2', version: 'v1', idempotent: true, failure: 'Time out after 10 s. The app retries once with the same Idempotency-Key, so a repeat never creates a second application. If the Credit Bureau is unavailable the application is saved as Referred and the applicant is told a decision will follow within one working day.', method: 'POST', path: '/applications', summary: 'Submit a loan application', tag: 'Applications', auth: 'OAuth2 / JWT bearer', params: [], request: '{\n  "amount": 50000,\n  "termMonths": 36,\n  "income": 32000\n}', response: '{\n  "id": "9b1c…",\n  "reference": "DLO-104233",\n  "status": "Submitted"\n}', codes: [{ code: '201', desc: 'Created' }, { code: '400', desc: 'Validation failed' }, { code: '401', desc: 'Not signed in' }], requirementIds: ['r3'] },
+      { id: 'api2', entity: 'en2', version: 'v1', failure: 'Returns 404 if the application does not belong to the signed-in customer (no data leak).', method: 'GET', path: '/applications/{id}', summary: 'Get application status and decision', tag: 'Applications', auth: 'OAuth2 / JWT bearer', params: [{ name: 'id', in: 'path', type: 'string', required: true, desc: 'Application ID' }], request: '', response: '{\n  "id": "9b1c…",\n  "status": "Approved",\n  "decisionAt": "2027-02-01T10:22:00Z"\n}', codes: [{ code: '200', desc: 'OK' }, { code: '404', desc: 'Not found' }], requirementIds: ['r4'] },
+      { id: 'api3', entity: 'en2', version: 'v1', method: 'GET', path: '/referrals', summary: 'List referred applications for review', tag: 'Back office', auth: 'OAuth2 / JWT bearer', params: [{ name: 'page', in: 'query', type: 'integer', desc: 'Page number' }], request: '', response: '[ { "id": "…", "submittedAt": "…" } ]', codes: [{ code: '200', desc: 'OK' }, { code: '403', desc: 'Not a credit officer' }], requirementIds: ['r5'] },
     ],
     integrations: [
-      { system: 'Credit Bureau', direction: 'Outbound', protocol: 'REST', frequency: 'Real-time per application', data: 'ID number, consent token → score, report reference', auth: 'mTLS + API key', owner: 's5', sla: '99.5%; on timeout refer the application' },
-      { system: 'Core Banking', direction: 'Two-way', protocol: 'Message queue', frequency: 'Real-time', data: 'Approved loan → account number and disbursement status', auth: 'Service account', owner: 's5' },
+      { system: 'Credit Bureau', direction: 'Outbound', protocol: 'REST', frequency: 'Real-time per application', data: 'ID number, consent token → score, report reference', auth: 'mTLS + API key', owner: 's5', state: 'Existing and kept', mapping: [{ source: 'bureau_score', target: 'CreditCheck.score', rule: 'Integer 0–999; store as received' }, { source: 'report_id', target: 'CreditCheck.reportRef', rule: 'Prefix with BUR-' }, { source: 'retrieved_at (UTC)', target: 'CreditCheck.checkedAt', rule: 'Convert UTC to SAST' }], sla: '99.5%; on timeout refer the application' },
+      { system: 'Core Banking', direction: 'Two-way', protocol: 'Message queue', frequency: 'Real-time', data: 'Approved loan → account number and disbursement status', auth: 'Service account', owner: 's5', state: 'To-be (new)', mapping: [] },
       { system: 'E-signature service', direction: 'Outbound', protocol: 'REST', frequency: 'Per approved application', data: 'Contract PDF → signed contract', auth: 'OAuth2 client credentials', owner: 's4' },
     ],
     raid: [
@@ -205,6 +213,37 @@ export function sampleProject() {
       { code: 'WI-005', item: 'Referral queue for credit officers', phase: 'Build', role: 'ra3', optimistic: 20, likely: 28, pessimistic: 45, requirementIds: [] },
       { code: 'WI-006', item: 'System, integration and performance testing', phase: 'Test', role: 'ra4', optimistic: 30, likely: 40, pessimistic: 60, requirementIds: [] },
       { code: 'WI-007', item: 'Release, data migration and hypercare', phase: 'Deploy', role: 'ra3', optimistic: 8, likely: 12, pessimistic: 20, requirementIds: [] },
+    ],
+    screens: [
+      { id: 'sc1', code: 'SCR-01', name: 'Loan details', persona: 'p1', usecaseIds: ['u1'], apiIds: ['api1'], purpose: 'The applicant chooses an amount and term and sees the monthly repayment before applying.', fields: [
+        { label: 'Loan amount', control: 'Currency', required: true, validation: 'R 5 000 – R 250 000, whole rands', mapsTo: 'Application.amount' },
+        { label: 'Term (months)', control: 'Dropdown', required: true, validation: '12, 24, 36, 48 or 60', mapsTo: 'Application.termMonths' },
+        { label: 'Monthly repayment', control: 'Read-only', validation: 'Calculated: amortised at the quoted rate', mapsTo: '' },
+        { label: 'Continue', control: 'Button', validation: 'Enabled when both fields are valid' },
+      ], notes: 'Error text under each field; amount above the limit shows “The maximum is R 250 000”.' },
+      { id: 'sc2', code: 'SCR-02', name: 'Personal details', persona: 'p1', usecaseIds: ['u1'], apiIds: ['api1'], purpose: 'Confirm identity and contact details (pre-filled from the customer profile).', fields: [
+        { label: 'Full name', control: 'Text', required: true, validation: 'Pre-filled, read-only if verified', mapsTo: 'Customer.fullName' },
+        { label: 'ID number', control: 'Text', required: true, validation: '13 digits, Luhn check', mapsTo: 'Customer.idNumber' },
+        { label: 'Email', control: 'Email', required: true, validation: 'Valid email format', mapsTo: 'Customer.email' },
+        { label: 'Date of birth', control: 'Date', required: true, validation: 'Applicant must be 18 or older', mapsTo: 'Customer.dateOfBirth' },
+        { label: 'Monthly income', control: 'Currency', required: true, validation: 'R 3 000 or more', mapsTo: '' },
+        { label: 'Submit application', control: 'Button' },
+      ], notes: 'Monthly income is not yet stored anywhere — open question for the data team.' },
+    ],
+    components: [
+      { id: 'c1', code: 'CMP-01', name: 'Branch paper forms', layer: 'Presentation (UI)', state: 'As-is (to retire)', technology: 'Paper + scanner', description: 'Applications captured on paper in branches.', connections: [{ to: 'c2', method: 'Manual (spreadsheet / re-keying)', frequency: 'Daily', data: 'Application details', state: 'As-is only' }] },
+      { id: 'c2', code: 'CMP-02', name: 'Loan scoring spreadsheet', layer: 'Business logic / services', state: 'As-is (to retire)', technology: 'Excel', description: 'Credit officers score applications by hand.', connections: [{ to: 'c6', method: 'Manual (spreadsheet / re-keying)', frequency: 'Daily', data: 'Approved loans', state: 'As-is only' }] },
+      { id: 'c3', code: 'CMP-03', name: 'Banking app (apply journey)', layer: 'Presentation (UI)', state: 'To-be (new)', technology: 'React Native', description: 'Customers apply and see the decision.', connections: [{ to: 'c4', method: 'REST API', frequency: 'Real-time', data: 'Applications, status', state: 'To-be only' }] },
+      { id: 'c4', code: 'CMP-04', name: 'Loan origination service', layer: 'Business logic / services', state: 'To-be (new)', technology: 'Java service', description: 'Validates applications and applies the decision rules.', connections: [{ to: 'c5', method: 'Database link', frequency: 'Real-time', data: 'Applications, decisions', state: 'To-be only' }, { to: 'c7', method: 'REST API', frequency: 'Per application', data: 'Credit report request', state: 'To-be only' }, { to: 'c6', method: 'Event / message', frequency: 'Real-time', data: 'Approved loan', state: 'To-be only' }] },
+      { id: 'c5', code: 'CMP-05', name: 'Origination database', layer: 'Data', state: 'To-be (new)', technology: 'PostgreSQL', description: 'Applications, credit checks and documents.', connections: [] },
+      { id: 'c6', code: 'CMP-06', name: 'Core Banking', layer: 'External system', state: 'Existing and kept', technology: 'Mainframe', description: 'System of record for loan accounts.', connections: [] },
+      { id: 'c7', code: 'CMP-07', name: 'Credit Bureau', layer: 'External system', state: 'Existing and kept', technology: 'Bureau REST API', description: 'Credit reports and scores.', connections: [] },
+    ],
+    defects: [
+      { id: 'd1', code: 'DEF-014', title: 'Submit stays enabled when the amount is above the maximum', testId: 'tc2', environment: 'UAT', severity: 'High', priority: 'P2 — this release', steps: ['Sign in as the UAT test customer', 'Open Apply for a personal loan', 'Enter R 300 000 and 36 months', 'Tab out of the amount field'], expected: 'Message “The maximum is R 250 000” and the Continue button is disabled.', actual: 'The message shows but Continue is still enabled; pressing it reaches the next screen.', status: 'Open', reportedBy: 's3', assignee: 'Front-end team', date: '2026-11-12', requirementIds: ['r3'], notes: '' },
+    ],
+    queries: [
+      { id: 'q1', code: 'Q-01', name: 'Applications per status', purpose: 'Checks the decision mix against the target auto-decision rate (OBJ-02).', sql: 'SELECT "status", COUNT(*) AS total\nFROM "Application"\nGROUP BY "status"\nORDER BY total DESC;', requirementIds: [] },
     ],
     glossary: [
       { term: 'Affordability', definition: 'Assessment of whether the applicant can repay the loan after essential expenses, as required by the National Credit Act.' },

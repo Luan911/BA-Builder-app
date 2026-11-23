@@ -99,8 +99,8 @@ export function deleteProject(id) {
   emit({ rerender: true });
 }
 
-export function saveSettings(patch) {
+export function saveSettings(patch, { quiet = false } = {}) {
   settings = { ...settings, ...patch };
   safe.set(SKEY, JSON.stringify(settings));
-  emit({ rerender: true, settings: true });
+  if (!quiet) emit({ rerender: true, settings: true });
 }

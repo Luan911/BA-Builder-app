@@ -56,13 +56,55 @@ export async function render(code, { light = false, tidy = false } = {}) {
   const elId = `mmd${Date.now().toString(36)}${seq++}`;
   try {
     const { svg } = await mm.render(elId, code);
-    return svg;
+    return umlLinks(svg, code);
   } catch (e) {
     document.getElementById(elId)?.remove();
     document.getElementById(`d${elId}`)?.remove();
     throw new Error(String(e?.message || e).split('\n').slice(0, 6).join('\n'));
   }
 }
+
+/**
+ * UML-correct link ends for flowchart-based diagrams. Mermaid puts an arrowhead even on plain
+ * `---` links, so associations (actor — use case) get no arrowhead, and `-->|is a|` links get the
+ * UML generalisation hollow triangle.
+ */
+function umlLinks(svg, code) {
+  if (!/^\s*(%%.*\n\s*)*(flowchart|graph)\b/.test(code) || !/ --- |\|is a\|/.test(code)) return svg;
+  const plain = [], general = [];
+  for (const line of code.split('\n')) {
+    let m = line.match(/^\s*(\S+) --- (\S+)\s*$/);
+    if (m) plain.push(`L_${m[1]}_${m[2]}_`);
+    m = line.match(/^\s*(\S+) -->\|is a\| (\S+)\s*$/);
+    if (m) general.push(`L_${m[1]}_${m[2]}_`);
+  }
+  if (!plain.length && !general.length) return svg;
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (root.nodeName === 'parsererror' || root.querySelector('parsererror')) return svg;
+  const paths = [...root.querySelectorAll('path[id^="L_"]')];
+  const starts = (id, list) => list.some((pre) => id.startsWith(pre) || id.replace(/^[^_]*-/, '').startsWith(pre));
+  for (const p of paths) if (starts(p.id, plain)) { p.removeAttribute('marker-end'); p.removeAttribute('marker-start'); }
+  const gen = paths.filter((p) => starts(p.id, general));
+  if (gen.length) {
+    const ns = 'http://www.w3.org/2000/svg';
+    let defs = root.querySelector('defs');
+    if (!defs) { defs = doc.createElementNS(ns, 'defs'); root.insertBefore(defs, root.firstChild); }
+    const mid = `${root.id || 'm'}-uml-generalisation`;
+    const mk = doc.createElementNS(ns, 'marker');
+    for (const [k, v] of Object.entries({ id: mid, viewBox: '0 0 12 12', refX: '11', refY: '6', markerWidth: '14', markerHeight: '14', orient: 'auto-start-reverse', markerUnits: 'userSpaceOnUse' })) mk.setAttribute(k, v);
+    const tri = doc.createElementNS(ns, 'path');
+    tri.setAttribute('d', 'M1,1 L11,6 L1,11 Z');
+    tri.setAttribute('fill', '#000000');
+    tri.setAttribute('stroke', paths[0] ? getComputedStroke(gen[0]) : '#ef4444');
+    tri.setAttribute('stroke-width', '1.5');
+    mk.appendChild(tri);
+    defs.appendChild(mk);
+    for (const p of gen) p.setAttribute('marker-end', `url(#${mid})`);
+  }
+  return new XMLSerializer().serializeToString(root);
+}
+const getComputedStroke = (p) => p.getAttribute('stroke') || (p.getAttribute('style') || '').match(/stroke:\s*([^;]+)/)?.[1] || '#ef4444';
 
 export async function validate(code) {
   const mm = await lib('dark');

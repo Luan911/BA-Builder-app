@@ -1,7 +1,23 @@
 // Document generators: industry-standard BA deliverables as Markdown, filled from project data.
 import { byId, nameOf, storyText, riskScore, riskLevel, businessCase, lintRequirement, today, rice, wsjf } from '../model.js';
 import * as D from './diagrams.js';
-import { rtmRows, sqlDdl } from './exports.js';
+import { rtmRows, sqlDdl, apiExamples, toXml } from './exports.js';
+import { lintApi, mappingIssues } from '../model.js';
+
+/** Generated request / response examples for an endpoint without its own, in JSON and XML. */
+function apiExampleBlock(p, a) {
+  if (a.request || a.response) return '';
+  const ex = apiExamples(p, a);
+  const parts = [];
+  if (ex.request !== undefined) parts.push(`**Request body (generated example)**\n\`\`\`json\n${JSON.stringify(ex.request, null, 2)}\n\`\`\``);
+  if (ex.response !== undefined) parts.push(`**Response (generated example)**\n\`\`\`json\n${JSON.stringify(ex.response, null, 2)}\n\`\`\``, `**The same response as XML** (for SOAP or legacy partners)\n\`\`\`xml\n${toXml(ex.root, ex.response)}\n\`\`\``);
+  return parts.length ? `${parts.join('\n\n')}\n\n` : '';
+}
+function apiFacts(p, a) {
+  const retry = a.idempotent || ['GET', 'PUT', 'DELETE'].includes(a.method) ? 'Yes' : 'No — callers send an Idempotency-Key so a repeat is ignored';
+  const issues = lintApi(a, p);
+  return `- **Version:** ${a.version || 'v1'} · **Security:** ${a.auth || '—'}\n- **Safe to retry:** ${retry}\n- **Failure handling:** ${a.failure || '_Not specified._'}${issues.length ? `\n\n> **Specification gaps:** ${issues.join('; ')}` : ''}\n\n`;
+}
 import { estimate } from '../estimate.js';
 import { analyseModel } from './normalise.js';
 
@@ -126,9 +142,10 @@ const DOCS = {
     `## 2. Use case diagram\n${mmd(D.useCaseDiagram(p))}`,
     ...p.usecases.map((u) => [
       `## ${u.code} ${u.name}`,
-      table(['Field', 'Value'], [['Primary actor', nameOf(p.personas, u.primary)], ['Supporting actors', (u.secondary || []).map((x) => nameOf(p.personas, x)).join(', ')], ['Level', u.level], ['Goal', u.goal], ['Trigger', u.trigger], ['Related requirements', codesOf(p.requirements, u.requirementIds)], ['Includes / extends', codesOf(p.usecases, u.includes)]]),
+      table(['Field', 'Value'], [['Primary actor', nameOf(p.personas, u.primary)], ['Supporting actors', (u.secondary || []).map((x) => nameOf(p.personas, x)).join(', ')], ['Level', u.level], ['Goal', u.goal], ['Trigger', u.trigger], ['Related requirements', codesOf(p.requirements, u.requirementIds)], ['«include»', codesOf(p.usecases, u.includes)], ['«extend» (extends)', codesOf(p.usecases, u.extends)]]),
       `### Preconditions\n${list(u.pre)}`, `### Main success scenario\n${ol(u.main)}`, `### Alternative flows\n${list(u.alt)}`, `### Exceptions\n${list(u.exceptions)}`, `### Postconditions\n${list(u.post)}`,
       `### Sequence\n${mmd(D.sequenceDiagram(p, u))}`,
+      `### Communication\n${mmd(D.communicationDiagram(p, u))}`,
     ].join('\n\n')),
   ] },
 
@@ -146,7 +163,7 @@ const DOCS = {
 
   processes: { title: 'Process Documentation (As-is / To-be)', audience: 'Process owners, operations', build: (p) => [
     header(p, 'Process Documentation', 'Describes current (as-is) and future (to-be) business processes, roles and pain points.'),
-    ...p.processes.map((x) => `## ${x.name} (${x.state})\n**Owner:** ${sh(p, x.owner) || '—'}\n\n${or(x.description, '')}\n\n${mmd(D.processDiagram(p, x))}\n\n${table(['Step', 'Type', 'Description', 'Who', 'Next', 'Pain point / note'], (x.steps || []).map((s, i, arr) => [s.id, s.kind, s.label, s.lane, s.kind === 'decision' ? `Yes → ${s.yes || '?'}, No → ${s.no || '?'}` : s.kind === 'end' ? '—' : s.next || arr[i + 1]?.id || '—', s.pain]))}`),
+    ...p.processes.map((x) => `## ${x.name} (${x.state})\n**Owner:** ${sh(p, x.owner) || '—'}\n\n${or(x.description, '')}\n\n${mmd(D.processDiagram(p, x))}\n\n#### UML activity view\n${mmd(D.activityDiagram(p, x))}\n\n${table(['Step', 'Type', 'Description', 'Who', 'Next', 'Pain point / note'], (x.steps || []).map((s, i, arr) => [s.id, s.kind, s.label, s.lane, s.kind === 'decision' ? `Yes → ${s.yes || '?'}, No → ${s.no || '?'}` : s.kind === 'end' ? '—' : s.next || arr[i + 1]?.id || '—', s.pain]))}`),
     `## Gap analysis\n${table(['Area', 'As-is', 'To-be', 'Action'], p.gaps.map((g) => [g.area, g.asIs, g.toBe, g.action]))}`,
   ] },
 
@@ -167,8 +184,39 @@ const DOCS = {
     `## 2. System context\n${mmd(D.contextDiagram(p))}`,
     `## 3. Integrations\n${table(['System', 'Direction', 'Protocol', 'Data exchanged', 'Frequency', 'Auth', 'SLA / errors', 'Owner'], p.integrations.map((i) => [i.system, i.direction, i.protocol, i.data, i.frequency, i.auth, i.sla, sh(p, i.owner)]))}`,
     `## 4. Endpoint summary\n${table(['Method', 'Path', 'Summary', 'Security', 'Requirements'], p.apis.map((a) => [a.method, `\`${a.path}\``, a.summary, a.auth, codesOf(p.requirements, a.requirementIds)]))}`,
-    ...p.apis.map((a) => `### ${a.method} \`${a.path}\`\n${a.summary}\n\n**Parameters**\n${table(['Name', 'In', 'Type', 'Required', 'Description'], (a.params || []).map((x) => [x.name, x.in, x.type, x.required || x.in === 'path' ? 'Yes' : 'No', x.desc]))}\n\n${a.request ? `**Request body**\n\`\`\`json\n${a.request}\n\`\`\`\n\n` : ''}${a.response ? `**Response**\n\`\`\`json\n${a.response}\n\`\`\`\n\n` : ''}**Response codes**\n${table(['Code', 'Meaning'], (a.codes || []).map((c) => [c.code, c.desc]))}`),
+    ...p.apis.map((a) => `### ${a.method} \`${a.path}\`\n${a.summary}\n\n${apiFacts(p, a)}**Parameters**\n${table(['Name', 'In', 'Type', 'Required', 'Description'], (a.params || []).map((x) => [x.name, x.in, x.type, x.required || x.in === 'path' ? 'Yes' : 'No', x.desc]))}\n\n${a.request ? `**Request body**\n\`\`\`json\n${a.request}\n\`\`\`\n\n` : ''}${a.response ? `**Response**\n\`\`\`json\n${a.response}\n\`\`\`\n\n` : ''}${apiExampleBlock(p, a)}**Response codes**\n${table(['Code', 'Meaning'], (a.codes || []).map((c) => [c.code, c.desc]))}`),
+    `## 5. Integration field mapping\n${p.integrations.filter((i) => (i.mapping || []).length).map((i) => `### ${i.system} (${i.direction || ''} · ${i.protocol || ''})\n${table(['Source field (their system)', 'Target (our attribute)', 'Transformation / rule'], i.mapping.map((m) => [m.source, m.target, m.rule]))}`).join('\n\n') || '_No field mappings recorded. Add them to each integration._'}`,
+    `## 6. Common response codes\n${table(['Code', 'Meaning', 'What the caller should do'], [['200 OK', 'Request succeeded', '—'], ['201 Created', 'A new record was created', 'Use the returned ID'], ['400 Bad Request', 'Input failed validation', 'Fix the fields listed in the error and resend'], ['401 Unauthorised', 'Missing or invalid credentials', 'Sign in again or refresh the token'], ['403 Forbidden', 'Signed in but not allowed', 'Request the right role'], ['404 Not Found', 'The record does not exist', 'Check the ID'], ['409 Conflict', 'Duplicate or out-of-date record', 'Reload and try again'], ['500 Internal Server Error', 'Something failed on the server', 'Retry later; report if it continues'], ['503 Service Unavailable', 'A dependency is down', 'Retry with back-off']])}`,
   ] },
+
+  mapping: { title: 'Data Mapping Specification', audience: 'Developers, testers, data team', build: (p) => {
+    const attrs = p.entities.flatMap((e) => (e.fields || []).filter((f) => f.name && !f.pk).map((f) => [e, f]));
+    const fed = new Set([...p.screens.flatMap((s) => (s.fields || []).map((f) => f.mapsTo)), ...p.integrations.flatMap((i) => (i.mapping || []).map((m) => m.target))].filter(Boolean));
+    const orphans = attrs.filter(([e, f]) => !fed.has(`${e.name}.${f.name}`) && !f.fk);
+    return [
+      header(p, 'Data Mapping Specification', 'Shows where every piece of data comes from and where it is stored: from each screen field to its database attribute, and from each external system to ours.'),
+      `## 2. Screens to database\n${p.screens.map((s) => { const issues = mappingIssues(s, p); return `### ${s.code} ${s.name}\n${or(s.purpose, '')}\n\n${mmd(D.dataFlow(p, s))}\n\n${table(['Field on screen', 'Control', 'Required', 'Validation / format', 'Stored in', 'Attribute type', 'Required in database'], (s.fields || []).map((f) => { const [en, fn] = String(f.mapsTo || '').split('.'); const a = (p.entities.find((e) => e.name === en)?.fields || []).find((x) => x.name === fn); return [f.label, f.control, f.required ? 'Yes' : 'No', f.validation, f.mapsTo || (f.control === 'Button' ? '—' : '**Not mapped**'), a?.type || '', a ? (a.required ? 'Yes' : 'No') : '']; }))}${issues.length ? `\n\n> **To resolve:** ${issues.join('; ')}` : ''}`; }).join('\n\n') || '_No screens recorded. Add them under Screens & data mapping._'}`,
+      `## 3. System to system\n${p.integrations.filter((i) => (i.mapping || []).length).map((i) => `### ${i.system} → ${p.meta.name || 'our system'}\n${table(['Source field', 'Target attribute', 'Transformation / rule'], i.mapping.map((m) => [m.source, m.target, m.rule]))}`).join('\n\n') || '_No integration field mappings recorded._'}`,
+      `## 4. Attributes with no known source\nThese attributes are not filled by any screen field or integration. Confirm whether the system calculates them, they come from another source, or they are not needed.\n\n${table(['Entity', 'Attribute', 'Type', 'Required'], orphans.map(([e, f]) => [e.name, f.name, f.type, f.required ? 'Yes' : 'No']))}`,
+      signoff(p),
+    ];
+  } },
+
+  architecture: { title: 'Solution Architecture Overview', audience: 'Architects, developers, sponsors', build: (p) => {
+    const newC = p.components.filter((c) => /^To-be/.test(c.state || '')), oldC = p.components.filter((c) => /^As-is/.test(c.state || ''));
+    const manual = p.components.flatMap((c) => (c.connections || []).filter((x) => /Manual/.test(x.method || '')).map((x) => [c.name, nameOf(p.components, x.to), x.data, x.frequency, x.state]));
+    return [
+      header(p, 'Solution Architecture Overview', 'A business-level view of the systems involved, how they connect today, and how they will connect after the change.'),
+      `## 2. Layers\n${table(['Layer', 'What it does', 'Components'], [['Presentation (UI)', 'What users see and interact with: web, mobile, dashboards', ''], ['Business logic / services', 'Rules, calculations, workflows and validation — where most requirements are implemented', ''], ['Integration / middleware', 'Moves data between systems: APIs, events, files', ''], ['Data', 'Stores and retrieves the information', ''], ['External system', 'Systems owned by others that we exchange data with', '']].map((r) => [r[0], r[1], p.components.filter((c) => c.layer === r[0]).map((c) => c.name).join(', ')]))}`,
+      `## 3. Current landscape (as-is)\n${mmd(D.architecture(p, 'as-is'))}${manual.length ? `\n\n**Manual connections today** (red dashed):\n\n${table(['From', 'To', 'Data', 'When', 'Landscape'], manual)}` : ''}`,
+      `## 4. Target landscape (to-be)\n${mmd(D.architecture(p, 'to-be'))}`,
+      `## 5. Layered view (to-be)\n${mmd(D.architecture(p, 'layers'))}`,
+      `## 6. What changes\n- **New components:** ${newC.map((c) => c.name).join(', ') || 'none'}\n- **Retiring:** ${oldC.map((c) => c.name).join(', ') || 'none'}\n- **Manual links removed:** ${manual.filter((m) => m[4] === 'As-is only').length}`,
+      `## 7. Component catalogue\n${table(['ID', 'Component', 'Layer', 'Technology', 'Landscape', 'Owner', 'Responsibility'], p.components.map((c) => [c.code, c.name, c.layer, c.technology, c.state, sh(p, c.owner), c.description]))}`,
+      `## 8. External integrations\n${mmd(D.contextDiagram(p))}`,
+      signoff(p),
+    ];
+  } },
 
   rtm: { title: 'Requirements Traceability Matrix', audience: 'Everyone', build: (p) => {
     const rows = rtmRows(p);
@@ -186,11 +234,12 @@ const DOCS = {
     const by = (s) => p.tests.filter((t) => t.status === s).length;
     return [
       header(p, 'User Acceptance Test Plan & Results', 'Defines how the business will verify the solution and records the results.'),
-      `## 2. Approach\nTests are derived from requirements and acceptance criteria. Each test case is executed by a business tester and recorded as Passed, Failed or Blocked. Failed tests are logged as defects and re-tested.`,
-      `## 3. Results summary\n${table(['Passed', 'Failed', 'Blocked', 'Not run', 'Total'], [[by('Passed'), by('Failed'), by('Blocked'), by('Not run'), p.tests.length]])}`,
-      `## 4. Test cases\n${p.tests.map((t) => `### ${t.code} ${t.title}\n- **Verifies:** ${[codesOf(p.requirements, t.requirementIds), codesOf(p.stories, t.storyIds)].filter(Boolean).join(', ') || '—'}\n- **Preconditions:** ${or(t.pre, '—')}\n- **Status:** ${t.status} · **Tester:** ${sh(p, t.tester) || '—'}\n\n**Steps**\n${ol(t.steps)}\n\n**Expected:** ${or(t.expected, '—')}${t.actual ? `\n\n**Actual:** ${t.actual}` : ''}`).join('\n\n') || '_No test cases._'}`,
+      `## 2. Approach\nTests are derived from requirements and acceptance criteria. System integration testing (SIT) checks that the systems work together; user acceptance testing (UAT) is the business confirming the solution meets its needs. Each test is recorded as Passed, Failed or Blocked. Failed tests are logged as defects — steps, expected and actual result, severity — and re-tested once fixed.`,
+      `## 3. Results summary\n${table(['Passed', 'Failed', 'Blocked', 'Not run', 'Total'], [[by('Passed'), by('Failed'), by('Blocked'), by('Not run'), p.tests.length]])}\n\n${table(['Test level', 'Tests', 'Passed'], [...new Set(p.tests.map((t) => t.level || 'Not set'))].map((l) => [l, p.tests.filter((t) => (t.level || 'Not set') === l).length, p.tests.filter((t) => (t.level || 'Not set') === l && t.status === 'Passed').length]))}`,
+      `## 4. Test cases\n${p.tests.map((t) => `### ${t.code} ${t.title}\n- **Level:** ${t.level || '—'}\n- **Verifies:** ${[codesOf(p.requirements, t.requirementIds), codesOf(p.stories, t.storyIds)].filter(Boolean).join(', ') || '—'}\n- **Preconditions:** ${or(t.pre, '—')}\n- **Status:** ${t.status} · **Tester:** ${sh(p, t.tester) || '—'}${p.defects.some((d) => d.testId === t.id) ? `\n- **Defects:** ${p.defects.filter((d) => d.testId === t.id).map((d) => `${d.code} (${d.status})`).join(', ')}` : ''}\n\n**Steps**\n${ol(t.steps)}\n\n**Expected:** ${or(t.expected, '—')}${t.actual ? `\n\n**Actual:** ${t.actual}` : ''}`).join('\n\n') || '_No test cases._'}`,
       `## 5. Acceptance criteria to be verified\n${p.requirements.filter((r) => (r.acceptance || []).length).map((r) => `### ${r.code} ${r.title}\n${acceptance(r)}`).join('\n\n')}`,
-      `## 6. UAT sign-off\nBy signing, the approver confirms the solution meets the agreed acceptance criteria.\n\n${signoff(p).replace('## Approval\n', '')}`,
+      `## Defect log\n${table(['ID', 'Defect', 'Test', 'Environment', 'Severity', 'Priority', 'Status'], p.defects.map((d) => [d.code, d.title, byId(p.tests, d.testId)?.code || '', d.environment, d.severity, d.priority, d.status]))}\n\n${p.defects.map((d) => `### ${d.code} ${d.title}\n**Steps to reproduce**\n${ol(d.steps)}\n\n**Expected:** ${or(d.expected, '—')}\n\n**Actual:** ${or(d.actual, '—')}${d.notes ? `\n\n**Notes:** ${d.notes}` : ''}`).join('\n\n')}`,
+      `## 6. UAT sign-off\nBy signing, the approver confirms the solution meets the agreed acceptance criteria.${p.defects.some((d) => ['Critical', 'High'].includes(d.severity) && !['Closed', 'Rejected', 'Deferred'].includes(d.status)) ? '\n\n> **Open critical or high defects remain — resolve or formally accept them before sign-off.**' : ''}\n\n${signoff(p).replace('## Approval\n', '')}`,
     ];
   } },
 

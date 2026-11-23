@@ -45,10 +45,25 @@ light version so they print cleanly on white paper.
 | **Traceability** | RTM, objective coverage matrix, trace graph and an impact explorer (what changes if this requirement changes?) |
 
 ### Diagrams
-Generated from your data, always in sync: system context, BPMN-style process flows,
-use case, sequence (from use case flows), state machine, ERD, class, decision flow,
+Generated from your data, always in sync: system context, as-is and to-be architecture
+landscapes, layered architecture, BPMN-style process flows, UML activity, use case, sequence,
+communication, state machine, ERD, class, data flow (screen → API → database), decision flow,
 stakeholder map, traceability graph, value vs effort, scope mind map, release roadmap,
-delivery schedule (Gantt from the estimate).
+delivery schedule (Gantt from the estimate). Each diagram has a short **How to read it** key.
+
+**UML notation** follows standard practice for business analysts:
+- *Use case* — system boundary, actors outside (primary left, secondary right), plain association
+  lines, «include» (base → included) and «extend» (extension → base), actor generalisation with a
+  hollow triangle.
+- *Class* — singular class names, typed attributes with PK / FK, operations, associations without
+  navigability arrows, multiplicity at both ends (1, 0..1, *, 1..*), aggregation (hollow diamond),
+  composition (filled diamond) and generalisation (hollow triangle).
+- *Sequence* — actor and system lifelines, synchronous calls with activation bars, dashed returns,
+  self messages for internal work, asynchronous notifications, and alternative / exception flows
+  as `alt` fragments at the step they branch from.
+- *Activity* — initial and final nodes, actions, decisions with [guards], fork / join bars for
+  parallel work, accept-event and time-event actions, and swimlane partitions.
+- *State machine* — transitions labelled `event [guard] / action`.
 
 **Big models stay readable.** Traceability is also drawn one graph per objective, and the data model
 one diagram per area (set an entity's *Area*, or the app groups linked entities for you). Links to
@@ -71,19 +86,48 @@ Plus:
 - **Whiteboard** — drag-and-drop flowcharts and low-fidelity wireframes with connectors,
   pan/zoom, and SVG/PNG/JSON export.
 
-### Documents (19)
+### Documents (21)
 Project Charter · Business Case · Strategy Analysis · Stakeholder Analysis & Engagement Plan ·
 Elicitation Report & Minutes · BRD · SRS (ISO/IEC/IEEE 29148 structure) · Use Case
 Specifications · Product Backlog · Process Documentation · Data Dictionary · API & Interface
 Specification · Traceability Matrix · UAT Plan & Results · RAID & Decision Log · Change
-Request Log · Release & Transition Plan · Cost & Schedule Estimate · Glossary.
+Request Log · Release & Transition Plan · Cost & Schedule Estimate · **Data Mapping
+Specification** · **Solution Architecture Overview** · Glossary.
 
 Each exports to **Word (.doc)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
 
 ### Technical exports
-OpenAPI 3.0 YAML · PostgreSQL DDL · JSON Schema · RTM CSV · every register as CSV ·
+OpenAPI 3.0 YAML · **Postman collection** · PostgreSQL DDL · JSON Schema · RTM CSV · every register as CSV ·
 a complete ZIP pack · the project file (JSON) for backup and sharing.
 Requirements, stories, stakeholders, RAID, tests, questions and glossary can be imported from CSV.
+
+## Technical BA toolkit
+- **SQL workbench** — runs real SQLite in the browser on tables built from your data model and
+  filled with realistic sample data that respects keys and foreign keys. Example queries are
+  generated from your own entities (SELECT, WHERE, ORDER BY, INNER / LEFT JOIN, GROUP BY, HAVING,
+  plus data-quality checks). Import CSV, export results, save queries against requirements.
+- **Screens & data mapping** — every screen field mapped to where it is stored (Entity.attribute),
+  with checks for unmapped fields, missing attributes, type and required mismatches, plus a data flow
+  diagram from screen to API to database and a Data Mapping Specification. Integrations get
+  system-to-system field mapping too.
+- **API specifications** — resource entity, version, idempotency (safe to retry) and failure handling
+  (timeouts, retries, duplicates, what the user sees), standard status codes, generated JSON and XML
+  examples, quality checks, OpenAPI and Postman exports.
+- **Architecture** — components by layer (presentation, business logic, integration, data,
+  external), as-is vs to-be landscapes with manual hand-offs highlighted, and a Solution
+  Architecture Overview.
+- **Testing** — test levels (SIT, UAT, regression…) and a defect log with steps to reproduce,
+  expected vs actual, severity and priority, linked to tests and requirements.
+- **AI-aware analysis** — business rules record who decides (system, AI with human approval, person)
+  and there is an AI-governance NFR template.
+- **Requirement suggestions** — besides the blocking quality checks, the editor suggests questions
+  worth asking (unhappy paths, failed notifications, which fields can change).
+
+## Interview practice
+37 common Business Analyst and Technical BA interview questions in nine areas (scenarios,
+requirements, stakeholders, Agile, UML, data & SQL, APIs, testing, AI). Answer first, then compare
+with an answer outline, see the common mistake to avoid, and jump to the screen where you practise
+that skill. A two-minute timer, notes and confidence ratings are kept on your device.
 
 ## Run it
 
@@ -119,9 +163,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-197 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+241 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-splitting big diagrams (nothing lost, no part too big), normalising to 3NF, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), normalising to 3NF, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs
@@ -158,6 +202,8 @@ js/views/             one file per screen
 js/estimate.js        cost & time maths: PERT, working-day calendar, schedule
 js/templates.js       NFR templates used by the SRS wizard
 js/gen/normalise.js   1NF / 2NF / 3NF checks and model restructuring
+js/gen/sqldata.js     SQLite schema, sample data and example queries for the SQL workbench
+js/practice-bank.js   interview practice questions
 tests/                automated tests (see below)
 ```
 

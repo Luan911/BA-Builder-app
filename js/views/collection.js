@@ -1,5 +1,5 @@
 // Generic list + editor for any collection in COLLECTIONS.
-import { COLLECTIONS, uid, ensureCode, lintRequirement } from '../model.js';
+import { COLLECTIONS, uid, ensureCode, lintRequirement, suggestRequirement } from '../model.js';
 import { project, update } from '../store.js';
 import { esc, $, $$, modal, toast, confirmBox, renderForm, wireForm, readForm, download, fileSafe } from '../ui.js';
 import { toCsv } from '../gen/exports.js';
@@ -21,7 +21,7 @@ export function renderCollection(root, key, opts = {}) {
   for (const f of Object.keys(filters)) if (st[f]) items = items.filter((it) => it[f] === st[f]);
 
   root.innerHTML = `
-    ${heading ? `<div class="page-head"><div><h1>${esc(c.title)}</h1>${c.intro ? `<p>${esc(c.intro)}</p>` : ''}</div></div>` : ''}
+    ${heading ? `<div class="page-head"><div><h1>${esc(c.title)}</h1>${c.intro ? `<p>${esc(c.intro)}</p>` : ''}</div>${(c.links || []).length ? `<span class="grow"></span>${c.links.map(([href, label]) => `<a class="btn" href="${href}">${esc(label)}</a>`).join('')}` : ''}</div>` : ''}
     ${extra}
     <section class="card flush">
       <div class="card-head">
@@ -76,7 +76,8 @@ export function openItem(key, id, preset = {}) {
   const showLint = () => {
     if (key !== 'requirements') return;
     const issues = lintRequirement({ ...item, ...readForm(form, c.fields) }, p);
-    $('[data-lint]', body).innerHTML = issues.length ? `<div class="callout warn" style="margin-bottom:12px"><b>Quality check</b><ul class="lint">${issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '<div class="callout" style="margin-bottom:12px">✓ Passes the quality checks.</div>';
+    const tips = suggestRequirement({ ...item, ...readForm(form, c.fields) });
+    $('[data-lint]', body).innerHTML = (issues.length ? `<div class="callout warn" style="margin-bottom:12px"><b>Quality check</b><ul class="lint">${issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '<div class="callout" style="margin-bottom:12px">✓ Passes the quality checks.</div>') + (tips.length ? `<div class="small" style="margin:-4px 0 12px;padding:8px 12px;border-left:3px solid var(--green);background:var(--surface-2);border-radius:6px"><b>Questions worth asking</b> <span class="muted">(suggestions, not errors)</span><ul class="lint" style="margin:4px 0 0">${tips.map((i) => `<li>${esc(i)}</li>`).join('')}</ul></div>` : '');
   };
   showLint();
   form.addEventListener('input', showLint);

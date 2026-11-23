@@ -10,4 +10,5 @@ export const NFR_TEMPLATES = [
   ['Reliability', 'Recovery', 'The system shall be restored within 4 hours of a failure (RTO) with no more than 15 minutes of data loss (RPO).', 'RTO ≤ 4 h, RPO ≤ 15 min'],
   ['Auditability', 'Audit trail', 'The system shall log every create, update or delete of business data with the user, the time, the old value and the new value. Audit records shall be kept for 7 years.', '100% of changes logged; 7-year retention'],
   ['Compliance', 'Data protection law', 'The system shall allow an authorised administrator to export or delete all personal data held about a person within 30 days of a verified request.', 'Requests completed within 30 days'],
+  ['AI governance', 'Human approval of AI decisions', 'The system shall record each AI recommendation with the model version, the input data and a confidence score, and shall require a person to approve any recommended refund above R 5 000.', '100% of AI recommendations logged; approval above R 5 000'],
 ];

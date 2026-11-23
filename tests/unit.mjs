@@ -340,5 +340,89 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   eq('snake_case style kept', sn.entities.find((e) => e.name === 'Supplier').fields.map((f) => f.name), ['supplier_id', 'name']);
 }
 
+// ---------- UML notation ----------
+{
+  const G = await import('../js/gen/diagrams.js');
+  const s = sampleProject();
+  const uc = G.useCaseDiagram(s);
+  t('use case: primary actors drawn before the boundary, secondary after', uc.indexOf('A_p1[') < uc.indexOf('subgraph SYS') && uc.indexOf('A_p3[') > uc.indexOf('  end'));
+  t('use case: associations are plain lines', /A_p1 --- U_u1/.test(uc) && !/A_p1 -->/.test(uc));
+  t('use case: «extend» points from the extension to the base', /U_u3 -\.->\|«extend»\| U_u1/.test(uc));
+  t('use case: actor generalisation (child → parent)', /A_p5 -->\|is a\| A_p2/.test(uc));
+  const cls = G.classDiagram(s);
+  t('class: no navigability arrows on associations', !/" --> "/.test(cls) && /"1" -- "\*"/.test(cls));
+  t('class: composition uses a filled diamond', /Application "1" \*-- "\*" Document/.test(cls));
+  t('class: keys marked, no fake visibility on attributes', /uuid id PK/.test(cls) && !/\+uuid id/.test(cls));
+  const s2 = sampleProject();
+  s2.relationships.push({ from: 'en1', to: 'en2', kind: 'generalisation' }, { from: 'en2', to: 'en3', kind: 'aggregation', card: 'one-to-one-or-more' });
+  s2.entities[0].operations = ['verifyIdentity', 'updateEmail(email)'];
+  const cls2 = G.classDiagram(s2);
+  t('class: generalisation triangle on the parent', /Customer <\|-- Application/.test(cls2));
+  t('class: aggregation hollow diamond with 1..* multiplicity', /Application "1" o-- "1\.\.\*" CreditCheck/.test(cls2));
+  t('class: operations end in ()', /\+verifyIdentity\(\)/.test(cls2) && /\+updateEmail\(email\)/.test(cls2));
+  t('ERD: generalisation shown as a subtype, not a crow\'s foot many', /Customer \|\|--o\| Application : "is a \(subtype\)"/.test(G.erd(s2)));
+  const seq = G.sequenceDiagram(s, s.usecases[3]);
+  t('sequence: user request answered by the system has an activation bar', /P->>\+S: Officer opens/.test(seq) && /S-->>-P: System shows/.test(seq));
+  t('sequence: internal system work is a self message', /S->>S: System records the override/.test(seq));
+  t('sequence: notifications are asynchronous', /S-\)P: System notifies/.test(seq));
+  t('sequence: alternative flows become alt fragments at their step', /alt Main flow\n\s+P->>S: Officer approves[\s\S]*else Alternative Override reason missing/.test(seq));
+  const act = G.activityDiagram(s, s.processes[1]);
+  t('activity: initial and final nodes, fork/join bars, [guards]', /:::initial/.test(act) && /:::final/.test(act) && (act.match(/:::bar/g) || []).length === 2 && /\|"\[yes\]"\|/.test(act));
+  t('activity: labelled end step keeps its action', /S_S13\("Funds disbursed"\):::action/.test(act) && /S_S13 --> S_S13_f/.test(act));
+  const sm = { name: 'x', initial: 'A', finals: ['B'], transitions: [{ from: 'A', to: 'B', event: 'pay', guard: 'amount > 0', action: 'send receipt' }] };
+  t('state: event [guard] / action', /: pay \(amount > 0\) \/ send receipt/.test(G.stateDiagram(s, sm)));
+  t('communication diagram numbers messages', /1: Applicant enters amount/.test(G.communicationDiagram(s, s.usecases[0])));
+  t('every diagram type has a "how to read it" legend', G.DIAGRAMS.filter((d) => ['usecase', 'sequence', 'communication', 'state', 'class', 'erd', 'activity', 'process'].includes(d.id)).every((d) => d.legend && d.legend.length > 60));
+}
+
+// ---------- Technical BA: SQL, API specs, data mapping, architecture ----------
+{
+  const Q = await import('../js/gen/sqldata.js');
+  const X = await import('../js/gen/exports.js');
+  const M = await import('../js/model.js');
+  const G = await import('../js/gen/diagrams.js');
+  const s = sampleProject();
+  const order = Q.tableOrder(s).map((e) => e.name);
+  t('tables are created parents first', order.indexOf('Customer') < order.indexOf('Application') && order.indexOf('Application') < order.indexOf('Document'));
+  const schema = Q.sqliteSchema(s).join('\n');
+  t('schema has keys and foreign keys', /PRIMARY KEY \("id"\)/.test(schema) && /FOREIGN KEY \("customerId"\) REFERENCES "Customer" \("id"\)/.test(schema));
+  const data = Q.sampleRows(s, 8);
+  t('sample data: every foreign key points at a real parent row', data.Application.every((a) => data.Customer.some((c) => c.id === a.customerId)) && data.Document.every((d) => data.Application.some((a) => a.id === d.applicationId)));
+  t('sample data: primary keys are unique', Object.values(data).every((rows) => new Set(rows.map((r) => r.id)).size === rows.length));
+  t('sample data: enum values come from the attribute description', data.Document.every((d) => d.kind === null || ['Payslip', 'Bank statement', 'ID'].includes(d.kind)));
+  eq('sample data is repeatable', JSON.stringify(Q.sampleRows(s, 3)), JSON.stringify(Q.sampleRows(s, 3)));
+  t('inserts escape quotes', Q.insertStatements({ ...s, entities: [{ name: 'T', fields: [{ name: 'x', type: 'string' }] }] }, { T: [{ x: "O'Brien" }] })[0].includes("'O''Brien'"));
+  const ex = Q.exampleQueries(s).map((x) => x.sql).join('\n');
+  t('example queries cover WHERE, ORDER BY, GROUP BY, JOIN, LEFT JOIN and HAVING', ['WHERE', 'ORDER BY', 'GROUP BY', 'INNER JOIN', 'LEFT JOIN', 'HAVING'].every((k) => ex.includes(k)));
+  // API checks
+  const bad = { method: 'POST', path: '/orders/{id}/items', codes: [{ code: '200' }], params: [], summary: 'Add item' };
+  const issues = M.lintApi(bad, s);
+  t('API check: missing 4xx, path param, retry behaviour and requirement link', ['client error', '{id}', 'retry', 'requirement'].every((k) => issues.some((i) => i.toLowerCase().includes(k.toLowerCase()))), issues.join(' | '));
+  eq('API check: a complete spec passes', M.lintApi(s.apis[0], s), []);
+  const e = X.apiExamples(s, { method: 'POST', path: '/applications', entity: 'en2' });
+  t('generated POST example leaves out the server-made key', e.request && !('id' in e.request) && 'amount' in e.request && e.response.id);
+  t('XML example mirrors the JSON', /<Application>\n  <id>APP-\d+<\/id>/.test(X.toXml('Application', e.response)) && X.toXml('a', { x: 'a<b & c' }).includes('a&lt;b &amp; c'));
+  const pm = X.postmanCollection(s);
+  t('Postman collection v2.1 with folders, :path params and idempotency key', /v2\.1\.0/.test(pm.info.schema) && pm.item.length === 2 && pm.item[0].item[1].request.url.path.includes(':id') && pm.item[0].item[0].request.header.some((h) => h.key === 'Idempotency-Key'));
+  // data mapping
+  const scr = { name: 'X', fields: [{ label: 'Amount', control: 'Text', mapsTo: 'Application.amount' }, { label: 'Email', control: 'Email', mapsTo: 'Customer.nope' }, { label: 'Name', control: 'Text' }, { label: 'Born', control: 'Date', mapsTo: 'Customer.fullName' }] };
+  const mi = M.mappingIssues(scr, s);
+  t('mapping: unmapped, missing attribute, type mismatch, required mismatch, no button', ['not mapped', 'no longer exists', 'is decimal', 'is string', 'optional on screen', 'No action button'].every((k) => mi.some((i) => i.includes(k))), mi.join(' | '));
+  eq('mapping: sample loan details screen is fully mapped', M.mappingIssues(s.screens[0], s), []);
+  t('data flow diagram goes screen → API → table', /SCR -->\|"submits"\| API0/.test(G.dataFlow(s, s.screens[0])) && /API0 -->\|"amount, termMonths"\| T_Application/.test(G.dataFlow(s, s.screens[0])));
+  t('edge labels with brackets are quoted (Mermaid rejects them otherwise)', /-\.->\|"Manual \(spreadsheet \/ re-keying\) · Daily"\|/.test(G.architecture(s, 'as-is')));
+  // requirement suggestions
+  t('suggests an unhappy path when acceptance criteria only cover success', M.suggestRequirement({ type: 'Functional', statement: 'The system shall save the profile.', acceptance: [{ given: 'a user', when: 'they save', then: 'it is saved' }] }).some((x) => /unhappy/.test(x)));
+  eq('no suggestion when an error path exists', M.suggestRequirement({ type: 'Functional', statement: 'The system shall save the profile.', acceptance: [{ given: 'a user', when: 'they save with a blank email', then: 'an error is shown' }] }), []);
+  // architecture
+  const asis = G.architecture(s, 'as-is'), tobe = G.architecture(s, 'to-be'), lay = G.architecture(s, 'layers');
+  t('as-is shows retiring systems and manual links in red', /Branch paper forms/.test(asis) && /-\.->/.test(asis) && /linkStyle 0,1 stroke:#ef4444/.test(asis) && !/Banking app/.test(asis));
+  t('to-be shows new components, not retired ones', /Banking app/.test(tobe) && !/paper forms/.test(tobe) && /:::added/.test(tobe));
+  t('layers view groups by layer in order', lay.indexOf('Presentation (UI)') < lay.indexOf('Business logic') && lay.indexOf('Business logic') < lay.indexOf('"Data"'));
+  // practice bank
+  const { BANK, CATEGORIES } = await import('../js/practice-bank.js');
+  t('practice bank: every question has a category, outline and app link', BANK.length >= 30 && BANK.every((q) => CATEGORIES.includes(q[0]) && q[3].length > 60 && /^#\//.test(q[5][0])));
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -268,3 +268,7 @@ select { max-width: 100%; }
   .paper th, .paper td { border-color: #bbb; }
   .paper code, .paper pre { background: #f3f3f3; color: #111; }
 }
+
+/* SQL workbench */
+.sqlgrid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .sqlgrid { grid-template-columns: minmax(0, 1fr); } }

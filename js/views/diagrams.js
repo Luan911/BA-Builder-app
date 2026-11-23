@@ -61,6 +61,7 @@ export function renderDiagrams(root, key) {
         </div>
         ${focusBar}
         <div class="stage" data-stage>Drawing…</div>
+        ${cur.def.legend ? `<p class="small" style="padding:10px 16px 0;margin:0"><b style="color:var(--green-2)">How to read it:</b> <span class="muted">${esc(cur.def.legend)}</span></p>` : ''}
         <details style="padding:10px 16px"><summary class="small muted">Diagram source (Mermaid)</summary><pre class="code" style="margin-top:8px">${esc(cur.code)}</pre></details>
       </section>
     </div>`;

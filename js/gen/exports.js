@@ -172,3 +172,76 @@ export function rtmCsv(p) {
   return csv(['Requirement', 'Title', 'Type', 'Priority', 'Status', 'Source', 'Objectives', 'Derived from', 'Use cases', 'Stories', 'Business rules', 'APIs', 'Tests'],
     rtmRows(p).map((x) => [x.r.code, x.r.title, x.r.type, x.r.priority, x.r.status, x.source, x.objectives.join('; '), x.parents.join('; '), x.usecases.join('; '), x.stories.join('; '), x.rules.join('; '), x.apis.join('; '), x.tests.join('; ')]));
 }
+
+// ---------- API examples (JSON and XML) and Postman ----------
+import { sampleRows } from './sqldata.js';
+
+/** A realistic example object for an entity (from the same generator as the SQL sample data). */
+export function exampleFor(p, entityId) {
+  const e = p.entities.find((x) => x.id === entityId || x.name === entityId);
+  if (!e) return null;
+  const row = sampleRows(p, 2)[e.name]?.[0] || {};
+  const out = {};
+  for (const f of e.fields || []) if (f.name) out[f.name] = row[f.name] ?? null;
+  return out;
+}
+
+/** Request / response examples for an endpoint: the analyst's own, or generated from its resource entity. */
+export function apiExamples(p, a) {
+  const own = (t) => { try { return t ? JSON.parse(t) : undefined; } catch { return t || undefined; } };
+  const ex = a.entity ? exampleFor(p, a.entity) : null;
+  const ent = p.entities.find((x) => x.id === a.entity);
+  const withoutKey = ex && ent ? Object.fromEntries(Object.entries(ex).filter(([k]) => !(ent.fields || []).find((f) => f.name === k)?.pk)) : ex;
+  const one = /\{\w+\}\s*$/.test(a.path || '');
+  let request = own(a.request), response = own(a.response), generated = false;
+  if (request === undefined && ex && ['POST', 'PUT', 'PATCH'].includes(a.method)) { request = a.method === 'POST' ? withoutKey : ex; generated = true; }
+  if (response === undefined && ex && a.method !== 'DELETE') { response = a.method === 'GET' && !one ? { items: [ex], total: 1 } : ex; generated = true; }
+  return { request, response, generated, root: ent?.name || 'Resource' };
+}
+
+const xmlName = (s) => String(s).replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^([^A-Za-z_])/, '_$1');
+const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/** The same data as XML, as a SOAP / legacy integration would exchange it. */
+export function toXml(name, value, indent = '') {
+  const n = xmlName(name);
+  if (value === null || value === undefined) return `${indent}<${n}/>`;
+  if (Array.isArray(value)) return `${indent}<${n}>\n${value.map((v) => toXml(n.replace(/s$/, '') || 'item', v, `${indent}  `)).join('\n')}\n${indent}</${n}>`;
+  if (typeof value === 'object') return `${indent}<${n}>\n${Object.entries(value).map(([k, v]) => toXml(k, v, `${indent}  `)).join('\n')}\n${indent}</${n}>`;
+  return `${indent}<${n}>${xmlEsc(value)}</${n}>`;
+}
+
+/** Postman collection (v2.1) so testers and developers can call every endpoint straight away. */
+export function postmanCollection(p) {
+  const folders = new Map();
+  for (const a of p.apis) {
+    const { request } = apiExamples(p, a);
+    const path = String(a.path || '/').replace(/^\//, '').split('/').filter(Boolean).map((s) => s.replace(/^\{(\w+)\}$/, ':$1'));
+    const query = (a.params || []).filter((x) => x.in === 'query' && x.name).map((x) => ({ key: x.name, value: '', description: x.desc || '', disabled: !x.required }));
+    const headers = [{ key: 'Accept', value: 'application/json' }];
+    if (request !== undefined) headers.push({ key: 'Content-Type', value: 'application/json' });
+    if (['POST', 'PATCH'].includes(a.method)) headers.push({ key: 'Idempotency-Key', value: '{{$guid}}', description: 'Lets the server ignore an accidental repeat of this request' });
+    for (const h of (a.params || []).filter((x) => x.in === 'header' && x.name)) headers.push({ key: h.name, value: '', description: h.desc || '' });
+    const item = {
+      name: a.summary || `${a.method} ${a.path}`,
+      request: {
+        method: a.method,
+        header: headers,
+        url: { raw: `{{baseUrl}}/${path.join('/')}${query.length ? `?${query.map((q) => `${q.key}=`).join('&')}` : ''}`, host: ['{{baseUrl}}'], path, ...(query.length ? { query } : {}), variable: path.filter((s) => s.startsWith(':')).map((s) => ({ key: s.slice(1), value: '' })) },
+        ...(request !== undefined ? { body: { mode: 'raw', raw: typeof request === 'string' ? request : JSON.stringify(request, null, 2), options: { raw: { language: 'json' } } } } : {}),
+        description: [a.summary, (a.requirementIds || []).length ? `Implements ${(a.requirementIds || []).map((id) => byId(p.requirements, id)?.code).filter(Boolean).join(', ')}` : '', a.failure ? `Failure handling: ${a.failure}` : ''].filter(Boolean).join('\n\n'),
+        ...(a.auth === 'None' ? { auth: { type: 'noauth' } } : {}),
+      },
+      response: [],
+    };
+    const tag = a.tag || 'Endpoints';
+    if (!folders.has(tag)) folders.set(tag, []);
+    folders.get(tag).push(item);
+  }
+  const usesKey = p.apis.some((a) => a.auth === 'API key');
+  return {
+    info: { name: `${p.meta.name || 'Project'} API`, description: `${p.meta.summary || ''}\n\nGenerated by BA Builder. Set baseUrl and the credentials in the collection variables.`, schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' },
+    auth: usesKey ? { type: 'apikey', apikey: [{ key: 'key', value: 'X-API-Key', type: 'string' }, { key: 'value', value: '{{apiKey}}', type: 'string' }, { key: 'in', value: 'header', type: 'string' }] } : { type: 'bearer', bearer: [{ key: 'token', value: '{{token}}', type: 'string' }] },
+    variable: [{ key: 'baseUrl', value: 'https://api.example.com/v1' }, usesKey ? { key: 'apiKey', value: '' } : { key: 'token', value: '' }],
+    item: [...folders].map(([name, item]) => ({ name, item })),
+  };
+}
