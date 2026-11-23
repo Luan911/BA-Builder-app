@@ -85,7 +85,7 @@ export function openItem(key, id, preset = {}) {
 
   const save = () => {
     const vals = readForm(form, c.fields);
-    const missing = c.fields.filter((f) => f.req && (Array.isArray(vals[f.key]) ? !vals[f.key].length : String(vals[f.key] ?? '').trim() === ''));
+    const missing = c.fields.filter((f) => f.req && !(f.key === 'code' && (c.prefix || c.codeFrom)) && (Array.isArray(vals[f.key]) ? !vals[f.key].length : String(vals[f.key] ?? '').trim() === ''));
     if (missing.length) return toast(`Please fill in: ${missing.map((f) => f.label).join(', ')}`, 'err');
     const merged = { ...item, ...vals };
     const invalid = c.validate?.(merged, p);

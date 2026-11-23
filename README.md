@@ -86,13 +86,13 @@ Plus:
 - **Whiteboard** — drag-and-drop flowcharts and low-fidelity wireframes with connectors,
   pan/zoom, and SVG/PNG/JSON export.
 
-### Documents (21)
+### Documents (22)
 Project Charter · Business Case · Strategy Analysis · Stakeholder Analysis & Engagement Plan ·
 Elicitation Report & Minutes · BRD · SRS (ISO/IEC/IEEE 29148 structure) · Use Case
 Specifications · Product Backlog · Process Documentation · Data Dictionary · API & Interface
 Specification · Traceability Matrix · UAT Plan & Results · RAID & Decision Log · Change
 Request Log · Release & Transition Plan · Cost & Schedule Estimate · **Data Mapping
-Specification** · **Solution Architecture Overview** · Glossary.
+Specification** · **Solution Architecture Overview** · **Business Analysis Plan & Performance** · Glossary.
 
 Each exports to **Word (.doc)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
 
@@ -122,6 +122,31 @@ Requirements, stories, stakeholders, RAID, tests, questions and glossary can be 
   and there is an AI-governance NFR template.
 - **Requirement suggestions** — besides the blocking quality checks, the editor suggests questions
   worth asking (unhappy paths, failed notifications, which fields can change).
+
+## BA Masterclass
+A complete course in business analysis inside the app (**Learn → BA Masterclass**): 13 modules and
+21 lessons following the BABOK® Guide v3 knowledge areas — foundations and the core concept model,
+planning & monitoring, elicitation & collaboration, strategy analysis, requirements analysis & design
+definition, requirements life cycle management, solution evaluation — plus BPMN and UML modelling,
+Agile BA (Scrum 2020, INVEST, Given/When/Then), technical BA (architecture, APIs, integration, data,
+normalisation, SQL, security and POPIA), testing & quality (SIT/UAT, defects, usability heuristics),
+process improvement (SIPOC, DMAIC, value streams) and career & certification. Every lesson has key
+ideas, how to apply them, links to practise in the app, a self-check quiz and its sources. Progress is
+saved, and the whole course downloads as one document.
+
+Sources include IIBA (BABOK® Guide, core concept model, Agile Extension, certifications), the PMI Guide
+to Business Analysis, IREB CPRE, ISO/IEC/IEEE 29148, BCS (POPIT, CATWOE), the 2020 Scrum Guide, the
+Agile Business Consortium (MoSCoW), Agile Alliance (INVEST), BPMN, Nielsen Norman Group, ASQ,
+Strategyzer, South Africa's Information Regulator (POPIA), and the Techcanvass, TechVedas, Passionate BA
+and Tech Bytes with Leena video series. Content is summarised in original wording with links to each
+source. BABOK® is a registered trademark of IIBA.
+
+**Technique library** — all 50 BABOK® techniques, what each is for, and where to practise it. Every
+technique is supported: besides the tools above, the app has a Business Model Canvas, business
+capability map, root cause analysis (5 Whys and fishbone), vendor / option assessment with weighted
+scoring, roles & permissions matrix (functions and CRUD), balanced-scorecard objectives with benefits
+tracking, functional decomposition, concept model, reviews & sign-offs, lessons learned and a
+business analysis plan.
 
 ## Interview practice
 37 common Business Analyst and Technical BA interview questions in nine areas (scenarios,
@@ -163,7 +188,7 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-241 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+261 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
 splitting big diagrams (nothing lost, no part too big), normalising to 3NF, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
@@ -178,6 +203,17 @@ node tests/stress.mjs
 A generated project of 2 000–6 600 items full of awkward text (quotes, pipes, `#`, `;`, brackets,
 emoji, Chinese, very long names) must build every document, diagram and export with no
 `undefined` / `NaN`, in seconds.
+
+```bash
+node tests/syntax.mjs
+```
+Strict syntax check of every script as an ES module (plain `node --check` can miss errors in `.js` files).
+
+**End to end:** serve the folder and open `http://localhost:8080/tests/e2e.html`. It drives the real app
+like a user — every screen, every document and diagram, add / edit / duplicate / delete in every
+register, the SRS wizard, undo, normalisation, SQL, estimates, vendors, the canvas, permissions, focus
+view, masterclass, practice and every export — and fails on any error. Your own projects are backed up
+first and restored afterwards.
 
 **In the browser:** serve the folder and open `http://localhost:8080/tests/browser.html`. It draws every
 diagram: example, empty and stress x1 / x3 projects, print theme, studio templates, tidy layout and focus views, and fails any that
@@ -204,6 +240,7 @@ js/templates.js       NFR templates used by the SRS wizard
 js/gen/normalise.js   1NF / 2NF / 3NF checks and model restructuring
 js/gen/sqldata.js     SQLite schema, sample data and example queries for the SQL workbench
 js/practice-bank.js   interview practice questions
+js/masterclass.js     BA Masterclass lessons, quizzes, sources and the 50-technique library
 tests/                automated tests (see below)
 ```
 

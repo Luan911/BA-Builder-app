@@ -736,6 +736,69 @@ export function architecture(p, view = 'to-be') {
   return L.join('\n');
 }
 
+// ---------- Business capability map (heat map of maturity gaps) ----------
+export function capabilityMap(p) {
+  const L = ['flowchart TB'];
+  const caps = p.capabilities;
+  if (!caps.length) return `${L[0]}\n  A[${q('Add business capabilities to draw the map')}]`;
+  const gap = (c) => Math.max(0, (+c.target || 0) - (+c.current || 0));
+  const node = (c) => `${id('K', c.id)}[${q(`${c.name}${c.current || c.target ? ` · ${c.current || '?'}→${c.target || '?'}` : ''}`)}]:::${gap(c) >= 2 ? 'big' : gap(c) === 1 ? 'some' : 'none'}`;
+  const tops = caps.filter((c) => !c.parent || !byId(caps, c.parent));
+  for (const t of tops) {
+    const kids = caps.filter((c) => c.parent === t.id);
+    if (!kids.length) { L.push(`  ${node(t)}`); continue; }
+    L.push(`  subgraph ${id('G', t.id)}[${q(`${t.name}${t.current || t.target ? ` · ${t.current || '?'}→${t.target || '?'}` : ''}`)}]`, '    direction LR');
+    const walk = (parent, depth) => caps.filter((c) => c.parent === parent.id).forEach((c) => { L.push(`    ${node(c)}`); if (depth < 3) walk(c, depth + 1); });
+    walk(t, 1);
+    L.push('  end');
+  }
+  L.push('  classDef none fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef some fill:#2a2108,stroke:#f59e0b,color:#f2f2f2', '  classDef big fill:#2a0e0e,stroke:#ef4444,stroke-width:2px,color:#f2f2f2');
+  return L.join('\n');
+}
+
+// ---------- Fishbone (Ishikawa) for a root cause analysis ----------
+export function fishbone(p, rc) {
+  const L = ['flowchart LR'];
+  if (!rc) return `${L[0]}\n  A[${q('Add a problem in Root cause analysis')}]`;
+  L.push(`  P[${q(rc.problem || 'Problem')}]:::effect`);
+  const cats = [...new Set((rc.causes || []).map((c) => c.category || 'Other'))];
+  cats.forEach((cat, i) => {
+    L.push(`  C${i}[${q(cat)}]:::cat`, `  C${i} --> P`);
+    (rc.causes || []).filter((c) => (c.category || 'Other') === cat).forEach((c, k) => L.push(`  C${i}_${k}(${q(c.cause)}):::cause --> C${i}`));
+  });
+  if ((rc.whys || []).length) {
+    L.push(`  subgraph W[${q('5 Whys')}]`, '    direction TB');
+    rc.whys.forEach((w, i) => L.push(`    W${i}[${q(`Why ${i + 1}: ${w}`)}]:::why`));
+    rc.whys.slice(1).forEach((_, i) => L.push(`    W${i} --> W${i + 1}`));
+    L.push('  end', `  P -.-> W0`);
+    if (rc.rootCause) L.push(`  RC[${q(`Root cause: ${rc.rootCause}`)}]:::root`, `  W${rc.whys.length - 1} --> RC`);
+  }
+  L.push('  classDef effect fill:#ef4444,stroke:#b91c1c,color:#000000', '  classDef cat fill:#2a0e0e,stroke:#ef4444,color:#f2f2f2', '  classDef cause fill:#111111,stroke:#8c8c8c,color:#f2f2f2', '  classDef why fill:#0d2416,stroke:#22c55e,color:#f2f2f2', '  classDef root fill:#22c55e,stroke:#15803d,color:#000000');
+  return L.join('\n');
+}
+
+// ---------- Functional decomposition: solution → epics → stories ----------
+export function decomposition(p) {
+  const t = (s) => word(s).slice(0, 55);
+  const L = ['mindmap', `  root((${t(p.meta.code || p.meta.name || 'Solution')}))`];
+  const epics = [...new Set(p.stories.map((s) => s.epic).filter(Boolean))];
+  if (epics.length) for (const e of epics) { L.push(`    ${t(e)}`); p.stories.filter((s) => s.epic === e).slice(0, 12).forEach((s) => L.push(`      ${t(`${s.code} ${s.iWant}`)}`)); }
+  else if (p.capabilities.length) p.capabilities.filter((c) => !c.parent).forEach((c) => { L.push(`    ${t(c.name)}`); p.capabilities.filter((k) => k.parent === c.id).forEach((k) => L.push(`      ${t(k.name)}`)); });
+  else L.push('    Add epics to user stories or business capabilities');
+  return L.join('\n');
+}
+
+// ---------- Concept model from the glossary ----------
+export function conceptModel(p) {
+  const L = ['flowchart LR'];
+  const linked = p.glossary.filter((g) => (g.related || []).some((r) => byId(p.glossary, r.to)) || p.glossary.some((h) => (h.related || []).some((r) => r.to === g.id)));
+  if (!linked.length) return `${L[0]}\n  A[${q('Link glossary terms (Related terms) to draw the concept model')}]`;
+  linked.forEach((g) => L.push(`  ${id('G', g.id)}([${q(g.term)}]):::term`));
+  for (const g of linked) for (const r of g.related || []) if (byId(p.glossary, r.to)) L.push(`  ${id('G', g.id)} -->|${q(r.verb || 'relates to')}| ${id('G', r.to)}`);
+  L.push('  classDef term fill:#0d2416,stroke:#22c55e,color:#f2f2f2');
+  return L.join('\n');
+}
+
 // ---------- registry ----------
 export const DIAGRAMS = [
   { id: 'arch-asis', title: 'Landscape — as-is', group: 'Architecture', build: (p) => architecture(p, 'as-is'), edit: '#/c/components', legend: 'Today\'s systems and how they connect. Red dashed links are manual (spreadsheets, re-keying, daily exports); red boxes will be retired.' },
@@ -757,6 +820,10 @@ export const DIAGRAMS = [
   { id: 'trace', title: 'Traceability graph', group: 'Requirements', build: (p) => traceGraph(p), edit: '#/trace' },
   { id: 'traceobj', title: 'Trace', group: 'Traceability by objective', parts: (p) => (p.objectives.length > 1 || p.requirements.length > LIMITS.partReqs ? traceParts(p) : []), edit: '#/trace' },
   { id: 'priority', title: 'Value vs effort', group: 'Requirements', build: (p) => valueEffort(p), edit: '#/prioritise' },
+  { id: 'capabilities', title: 'Business capability map', group: 'Strategy', build: (p) => capabilityMap(p), edit: '#/c/capabilities', legend: 'Capabilities grouped under their parent, with current → target maturity (1–5). Green = no gap, amber = gap of 1, red = gap of 2 or more: where investment matters most.' },
+  { id: 'fishbone', title: 'Fishbone (root cause)', group: 'Strategy', per: 'rootCauses', build: (p, x) => fishbone(p, x), edit: '#/c/rootCauses', legend: 'Ishikawa / fishbone: contributing causes grouped by category point at the problem (the effect). The 5 Whys chain drills down to the root cause.' },
+  { id: 'decomposition', title: 'Functional decomposition', group: 'Requirements', build: (p) => decomposition(p), edit: '#/c/stories', legend: 'The solution broken into epics and then stories (or capabilities into sub-capabilities): each level is a part of the level above.' },
+  { id: 'concepts', title: 'Concept model (glossary)', group: 'Data', build: (p) => conceptModel(p), edit: '#/c/glossary', legend: 'Business terms and how they relate, in plain language — agree the vocabulary before designing data.' },
   { id: 'mindmap', title: 'Scope mind map', group: 'Strategy', build: (p) => mindmap(p), edit: '#/charter' },
   { id: 'roadmap', title: 'Release roadmap', group: 'Planning', build: (p) => roadmap(p), edit: '#/c/releases' },
   { id: 'schedule', title: 'Delivery schedule (estimate)', group: 'Planning', build: (p) => schedule(p), edit: '#/estimate' },

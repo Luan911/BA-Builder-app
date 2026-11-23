@@ -6,6 +6,12 @@
   <title>BA Builder</title>
   <meta name="description" content="A complete workspace for Technical Business Analysts: strategy, elicitation, requirements, modelling, diagrams and documentation." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2322c55e'/%3E%3Cpath d='M7 7h6a3 3 0 0 1 0 6H7zM7 13h7a3 3 0 0 1 0 6H7z' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E" />
+  <script>
+    // Record unexpected errors from the very first moment (shown to the user by js/app.js, read by tests/e2e.html).
+    window.__babErrors = [];
+    addEventListener('error', function (e) { window.__babErrors.push(String((e.error && e.error.stack) || e.message)); });
+    addEventListener('unhandledrejection', function (e) { window.__babErrors.push(String((e.reason && (e.reason.stack || e.reason.message)) || e.reason)); });
+  </script>
   <link rel="stylesheet" href="css/app.css" />
   <meta name="theme-color" content="#000000" />
 </head>

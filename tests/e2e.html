@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BA Builder end-to-end test</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #000; color: #f2f2f2; font: 14px/1.5 'Segoe UI', Arial, sans-serif; margin: 0; padding: 16px; }
+  h1 { margin: 0 0 4px; border-left: 4px solid #ef4444; padding-left: 10px; }
+  .sum { font-size: 18px; margin: 10px 0; }
+  .ok { color: #22c55e; } .no { color: #f87171; }
+  #log { font: 12px/1.45 Consolas, monospace; white-space: pre-wrap; max-height: 45vh; overflow: auto; background: #0a0a0a; border: 1px solid #242424; padding: 8px; }
+  iframe { width: 1280px; height: 800px; border: 1px solid #333; margin-top: 10px; background: #000; }
+</style>
+</head>
+<body>
+<h1>BA Builder — end-to-end test</h1>
+<p>Drives the real app in the frame below like a user: every screen, every register (add, edit, duplicate, delete), the SRS wizard, normalisation, SQL, estimates, exports, masterclass and more — and fails on any error. Your own projects are backed up first and restored at the end.</p>
+<div class="sum" id="sum">Starting…</div>
+<div id="log"></div>
+<iframe id="app" title="BA Builder under test"></iframe>
+<script type="module">
+  const frame = document.getElementById('app');
+  const logEl = document.getElementById('log');
+  const sumEl = document.getElementById('sum');
+  const results = { pass: 0, fail: 0, failures: [] };
+  const log = (s, cls = '') => { logEl.insertAdjacentHTML('beforeend', `<div class="${cls}">${s.replace(/[&<]/g, (c) => ({ '&': '&amp;', '<': '&lt;' }[c]))}</div>`); logEl.scrollTop = logEl.scrollHeight; };
+  const check = (name, ok, detail = '') => { if (ok) { results.pass++; } else { results.fail++; results.failures.push(`${name}${detail ? ` — ${detail}` : ''}`); log(`✖ ${name}${detail ? ` — ${detail}` : ''}`, 'no'); } sumEl.textContent = `Running… ${results.pass} passed, ${results.fail} failed`; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let w, d;
+  const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (fn()) return true; } catch { /* not ready */ } await sleep(60); } return false; };
+  const $ = (s, root = d) => root.querySelector(s);
+  const $$ = (s, root = d) => [...root.querySelectorAll(s)];
+  const view = () => d.getElementById('view');
+  const ws = () => JSON.parse(w.localStorage.getItem('bab.workspace'));
+  const proj = () => { const x = ws(); return x.projects[x.current]; };
+  const go = async (hash, wait = 150) => { w.location.hash = hash; await sleep(wait); };
+  const errorsSince = (n) => (w.__babErrors || []).slice(n);
+  const BAD_TEXT = /could not be shown|Page not found|\bundefined\b|\bNaN\b|\[object Object\]/;
+
+  // ---- back up the user's data (same origin = same storage) and start from a clean workspace ----
+  const backup = {};
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('bab.')) backup[k] = localStorage.getItem(k); }
+  const restore = () => { for (const k of Object.keys(localStorage)) if (k.startsWith('bab.')) localStorage.removeItem(k); for (const [k, v] of Object.entries(backup)) localStorage.setItem(k, v); };
+  for (const k of Object.keys(localStorage)) if (k.startsWith('bab.')) localStorage.removeItem(k);
+
+  const loadApp = () => new Promise((res) => { frame.onload = () => res(); frame.src = `../index.html?e2e=${Date.now()}`; });
+  try {
+    await loadApp();
+    w = frame.contentWindow; d = w.document;
+    // capture console.error too, and stub downloads so exports can be checked
+    const downloads = [];
+    const ce = w.console.error.bind(w.console);
+    w.console.error = (...a) => { w.__babErrors.push(a.map(String).join(' ')); ce(...a); };
+    w.HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push({ name: this.download, href: this.href }); };
+    w.print = () => downloads.push({ name: 'print' });
+    await until(() => view() && view().innerText.length > 50);
+    check('app starts with the example project', /Digital Personal Loan Origination/.test(d.body.innerText));
+    const { COLLECTIONS } = await import('../js/model.js');
+    const { DOC_LIST } = await import('../js/gen/docs.js');
+    const { lessonList } = await import('../js/masterclass.js');
+
+    // ---- 1. every screen ----
+    log('1. Opening every screen…');
+    const routes = ['', 'srs/1', 'srs/2', 'srs/3', 'srs/4', 'srs/5', 'srs/6', 'srs/7', 'srs/8', 'srs/9', 'srs/10', 'charter', 'ba-plan', 'strategy', 'bmc', 'business-case', 'estimate', 'vendors', 'stakeholders', 'board', 'prioritise', 'trace', 'decision-tables', 'permissions', 'data', 'normalise', 'sql', 'diagrams', 'diagrams/focus', 'studio', 'canvas', 'docs', 'settings', 'masterclass', 'techniques', 'practice', ...Object.keys(COLLECTIONS).map((k) => `c/${k}`)];
+    for (const r of routes) {
+      const n = (w.__babErrors || []).length;
+      await go(`#/${r}`, r === 'sql' || r.startsWith('srs/10') ? 1200 : 200);
+      const txt = view().innerText;
+      check(`#/${r} renders`, txt.length > 20 && !BAD_TEXT.test(txt), (txt.match(/.{0,50}(could not be shown|Page not found|undefined|NaN|\[object Object\]).{0,30}/) || [''])[0]);
+      check(`#/${r} raises no errors`, !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+    }
+
+    // ---- 2. every document and every diagram ----
+    log('2. Documents and diagrams…');
+    for (const doc of DOC_LIST) {
+      const n = w.__babErrors.length;
+      await go(`#/docs/${doc.id}`, 100);
+      await until(() => !$$('.paper .mmd').some((m) => !m.querySelector('svg') && !m.querySelector('pre')), 20000);
+      const bad = $$('.paper .mmd p, .paper .mmd pre').map((e) => e.innerText).filter((x) => /could not|error/i.test(x));
+      check(`document ${doc.id}: diagrams drawn`, !bad.length, bad.join(' | ').slice(0, 200));
+      check(`document ${doc.id}: clean text`, !BAD_TEXT.test(view().innerText));
+      check(`document ${doc.id}: no errors`, !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 200));
+    }
+    await go('#/diagrams', 300);
+    const diagramLinks = $$('.doc-list a').map((a) => a.getAttribute('href'));
+    for (const href of diagramLinks) {
+      const n = w.__babErrors.length;
+      await go(href, 50);
+      const ok = await until(() => $('[data-stage] svg') || $('[data-stage] .err'), 15000);
+      check(`diagram ${decodeURIComponent(href)}`, ok && !$('[data-stage] .err') && !errorsSince(n).length, ($('[data-stage] .err')?.innerText || errorsSince(n).join(' | ')).slice(0, 200));
+    }
+
+    // ---- 3. add, edit, duplicate and delete in every register ----
+    log('3. Add / edit / duplicate / delete in every register…');
+    const fill = (field, el) => {
+      if (!el) return;
+      if (field.type === 'select') { const opt = [...el.options].find((o) => o.value); if (opt) el.value = opt.value; }
+      else if (field.type === 'multi') { const c = el.querySelector('input'); if (c) c.checked = true; }
+      else if (field.type === 'check') el.checked = true;
+      else if (field.type === 'number') el.value = field.min != null ? String(field.min) : '1';
+      else if (field.type === 'date') el.value = '2027-01-15';
+      else if (field.type === 'list') el.value = 'First item\nSecond item';
+      else if (field.type === 'rows') { el.parentElement.querySelector(`[data-add="${field.key}"]`)?.click(); }
+      else if (field.type === 'textarea') el.value = 'The system shall complete the end-to-end test in 2 seconds.';
+      else if (field.key !== 'code') el.value = `E2E ${field.label}`.slice(0, 40);
+    };
+    for (const [key, c] of Object.entries(COLLECTIONS)) {
+      const n = w.__babErrors.length;
+      await go(`#/c/${key}`, 150);
+      const before = (proj()[key] || []).length;
+      $('[data-add]', view())?.click();
+      const modalOk = await until(() => $('.backdrop form'), 3000);
+      if (!modalOk) { check(`${key}: editor opens`, false); continue; }
+      const form = $('.backdrop form');
+      for (const f of c.fields) if (f.req || ['select', 'number', 'date'].includes(f.type) === false) fill(f, form.querySelector(`[data-k="${f.key}"]`));
+      // fields with rules: keep their values valid
+      if (key === 'releases') { form.querySelector('[data-k="start"]').value = '2027-01-01'; form.querySelector('[data-k="end"]').value = '2027-02-01'; }
+      if (key === 'financials') form.querySelector('[data-k="year"]').value = '1';
+      if (key === 'capabilities') { form.querySelector('[data-k="current"]').value = '2'; form.querySelector('[data-k="target"]').value = '4'; }
+      $('.backdrop [data-save]').click();
+      await sleep(250);
+      const added = (proj()[key] || []).length === before + 1;
+      check(`${key}: add saves a new item`, added, $('.toast')?.innerText || '');
+      if ($('.backdrop')) { $('.backdrop [data-cancel]')?.click(); await sleep(100); }
+      if (!added) continue;
+      const item = proj()[key].at(-1);
+      // edit: reopen and save unchanged
+      await go(`#/c/${key}`, 120);
+      const row = $(`tr[data-id="${item.id}"]`, view());
+      check(`${key}: new item is listed`, !!row);
+      if (!row) continue;
+      row.click(); await until(() => $('.backdrop form'), 3000);
+      $('.backdrop [data-save]').click(); await sleep(200);
+      check(`${key}: edit saves`, (proj()[key] || []).length === before + 1 && !$('.backdrop'));
+      if ($('.backdrop')) { $('.backdrop [data-cancel]')?.click(); await sleep(100); }
+      // duplicate, then delete both
+      $(`tr[data-id="${item.id}"]`, view())?.click(); await until(() => $('.backdrop [data-dup]'), 3000);
+      $('.backdrop [data-dup]')?.click(); await sleep(200);
+      check(`${key}: duplicate`, (proj()[key] || []).length === before + 2);
+      for (const id of proj()[key].slice(before).map((x) => x.id)) {
+        await go(`#/c/${key}`, 120);
+        $(`tr[data-id="${id}"]`, view())?.click(); await until(() => $('.backdrop [data-del]'), 3000);
+        $('.backdrop [data-del]')?.click(); await until(() => $('.backdrop [data-yes]'), 3000);
+        $('.backdrop [data-yes]')?.click(); await sleep(200);
+      }
+      check(`${key}: delete`, (proj()[key] || []).length === before);
+      check(`${key}: no errors`, !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+    }
+
+    // ---- 4. workflows ----
+    log('4. Workflows…');
+    let n = w.__babErrors.length;
+    // undo
+    const g0 = proj().glossary.length;
+    await go('#/c/glossary', 150); $('[data-add]', view()).click(); await until(() => $('.backdrop form'));
+    $('.backdrop [data-k="term"]').value = 'Undo me'; $('.backdrop [data-k="definition"]').value = 'Temporary.'; $('.backdrop [data-save]').click(); await sleep(250);
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })); await sleep(250);
+    check('undo removes the last change', proj().glossary.length === g0);
+    // new SRS through the wizard
+    $('[data-newsrs]')?.click(); await until(() => $('.backdrop [data-n]'));
+    $('.backdrop [data-n]').value = 'E2E Online Store'; $('.backdrop [data-c]').value = 'E2E'; $('.backdrop [data-go]').click(); await sleep(400);
+    check('new SRS starts at step 1', /#\/srs\/1/.test(w.location.hash) && proj().meta.name === 'E2E Online Store');
+    const sumBox = $('[data-k="summary"]', view()); sumBox.value = 'An online store for testing.'; sumBox.dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(200);
+    check('wizard step 1 completes', $$('.wiz-steps li')[0]?.classList.contains('done'));
+    for (let s = 2; s <= 10; s++) { await go(`#/srs/${s}`, s === 10 ? 1200 : 200); check(`wizard step ${s} renders`, !!$('.wiz-head h1') && !BAD_TEXT.test(view().innerText)); }
+    // NFR template
+    await go('#/srs/6', 200); $('[data-tpl]', view())?.click(); await until(() => $('.backdrop [data-save]'));
+    $('.backdrop [data-save]').click(); await sleep(250);
+    check('NFR template saves', proj().requirements.some((r) => r.type === 'Non-functional'));
+    if ($('.backdrop')) $('.backdrop [data-cancel]')?.click();
+    // normalisation on a practice table
+    await go('#/normalise', 200); $('[data-practice]', view()).click(); await sleep(400);
+    $('[data-allone]', view())?.click(); await sleep(400);
+    check('normalisation: practice table reaches 2NF or 3NF', /3NF|2NF/.test($('[data-detail] .pill', view())?.innerText || ''));
+    // estimate starter roles
+    await go('#/estimate', 200); $('[data-starter]', view())?.click(); await sleep(250);
+    check('estimate: typical roles added', proj().rates.length >= 5);
+    // vendors
+    await go('#/vendors', 200); $('[data-addc]', view()).click(); await sleep(150); $('[data-addo]', view()).click(); await sleep(150);
+    const cn = $('[data-cn]', view()); cn.value = 'Fit'; cn.dispatchEvent(new w.Event('change')); await sleep(120);
+    const cw = $('[data-cw]', view()); cw.value = '100'; cw.dispatchEvent(new w.Event('change')); await sleep(120);
+    const sc = $('[data-s]', view()); sc.value = '4'; sc.dispatchEvent(new w.Event('change')); await sleep(150);
+    check('vendor assessment scores an option', /4\.00/.test(view().innerText));
+    // business model canvas
+    await go('#/bmc', 200); const bv = $('[data-k="value"]', view()); bv.value = 'Fast checkout'; bv.dispatchEvent(new w.Event('input')); await sleep(600);
+    check('business model canvas saves', (proj().bmc.value || []).includes('Fast checkout'));
+    // BA plan
+    await go('#/ba-plan', 200); const tools = $('[data-k="tools"]', view()); tools.value = 'BA Builder'; tools.dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(200);
+    check('BA plan saves', proj().baPlan.tools === 'BA Builder');
+    check('workflows raise no errors', !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+
+    // back to the example project for the rest
+    n = w.__babErrors.length;
+    await go('#/settings', 300);
+    const sel = $('[data-proj]'); const sample = [...sel.options].find((o) => /Digital Personal Loan/.test(o.text));
+    sel.value = sample.value; sel.dispatchEvent(new w.Event('change')); await sleep(400);
+    check('switch project', proj().meta.name === 'Digital Personal Loan Origination');
+    // permissions toggle
+    await go('#/permissions', 250); const box = $('input[data-r][data-k^="uc:"]', view()); const was = box.checked; box.click(); await sleep(150);
+    check('roles & permissions toggles', !!proj().permissions[box.dataset.r]?.[box.dataset.k] !== was);
+    box.click(); await sleep(100);
+    // SQL workbench
+    await go('#/sql', 300);
+    const sqlOk = await until(() => $('[data-out] table'), 20000);
+    check('SQL workbench runs the first example', sqlOk);
+    const ta = $('[data-sql]', view()); ta.value = 'SELECT COUNT(*) AS n FROM "Customer";'; $('[data-run]', view()).click(); await sleep(200);
+    check('SQL query returns a result', /\b\d+\b/.test($('[data-out] td')?.innerText || ''));
+    // focus view click
+    await go('#/diagrams/focus', 300); await until(() => $('[data-stage] svg'), 15000);
+    $('[data-stage] g.node[id*="O_"]')?.dispatchEvent(new w.MouseEvent('click', { bubbles: true })); await sleep(300);
+    check('focus view refocuses on click', /focus:objectives/.test(decodeURIComponent(w.location.hash)));
+    // masterclass
+    await go('#/masterclass', 200);
+    const r0 = $('[data-q]', view()); r0.checked = true; r0.dispatchEvent(new w.Event('change')); await sleep(200);
+    check('masterclass quiz gives feedback', /Correct|Not quite/.test(view().innerText));
+    $('[data-done]', view()).click(); await sleep(250);
+    check('masterclass lesson marked complete', /✓/.test($('.doc-list').innerText));
+    for (const l of lessonList()) { await go(`#/masterclass/${l.id}`, 60); check(`lesson ${l.id} renders`, view().innerText.includes(l.title)); }
+    // practice
+    await go('#/practice', 200); $('[data-show]', view()).click(); await sleep(150);
+    check('practice shows an answer outline', /A strong answer/.test(view().innerText));
+    // exports
+    downloads.length = 0;
+    await go('#/settings', 300);
+    for (const b of $$('.btn', view()).filter((x) => /\.(yaml|json|sql|csv|zip)|Postman|OpenAPI|DDL|Schema|RTM|project file|ZIP/i.test(x.innerText) && !/Import|Delete|New|Load/i.test(x.innerText))) { b.click(); await sleep(400); }
+    await until(() => downloads.length >= 5, 15000);
+    check('exports download files', downloads.length >= 5, downloads.map((x) => x.name).join(', '));
+    downloads.length = 0;
+    await go('#/docs/srs', 300); $('[data-word]', view()).click();
+    check('Word export of the SRS', await until(() => downloads.some((x) => /\.doc$/.test(x.name)), 30000));
+    $('[data-md]', view()).click(); await sleep(150);
+    check('Markdown export', downloads.some((x) => /\.md$/.test(x.name)));
+    await go('#/masterclass', 200); $('[data-dl]', view()).click(); await sleep(200);
+    check('masterclass download', downloads.some((x) => /Masterclass/.test(x.name)));
+    check('final steps raise no errors', !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+    check('no errors in the whole run', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
+  } catch (e) {
+    check('test run completed', false, e.stack || e.message);
+  } finally {
+    restore();
+    const ok = !results.fail;
+    sumEl.innerHTML = ok ? `<span class="ok">✔ All ${results.pass} checks passed</span> — your projects were restored.` : `<span class="no">✖ ${results.fail} of ${results.pass + results.fail} checks failed</span> — your projects were restored.`;
+    window.__e2e = { ...results, done: true };
+  }
+</script>
+</body>
+</html>

@@ -20,6 +20,17 @@ function apiFacts(p, a) {
 }
 import { estimate } from '../estimate.js';
 import { analyseModel } from './normalise.js';
+import { vendorScores, BSC } from '../model.js';
+
+const BMC_ROWS = [['segments', 'Customer segments'], ['value', 'Value propositions'], ['channels', 'Channels'], ['relationships', 'Customer relationships'], ['revenue', 'Revenue streams'], ['resources', 'Key resources'], ['activities', 'Key activities'], ['partners', 'Key partners'], ['costs', 'Cost structure']];
+/** Roles × functions and roles × data (CRUD) from the permissions matrix. */
+function permissionTables(p) {
+  const roles = p.personas.filter((x) => x.kind !== 'System');
+  if (!roles.length || !Object.keys(p.permissions || {}).length) return '_No roles and permissions recorded._';
+  const fn = p.usecases.length ? table(['Use case', ...roles.map((r) => r.name)], p.usecases.map((u) => [`${u.code} ${u.name}`, ...roles.map((r) => (p.permissions[r.id]?.[`uc:${u.id}`] ? '✓' : ''))])) : '';
+  const data = p.entities.length ? table(['Entity', ...roles.map((r) => r.name)], p.entities.map((e) => [e.name, ...roles.map((r) => p.permissions[r.id]?.[`en:${e.id}`] || '')])) : '';
+  return `${fn}\n\n**Data access** (C = create, R = read, U = update, D = delete)\n\n${data}`;
+}
 
 const cell = (v) => String(v ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ').trim() || '—';
 export const table = (head, rows) => (rows.length ? [`| ${head.map(cell).join(' | ')} |`, `| ${head.map(() => '---').join(' | ')} |`, ...rows.map((r) => `| ${r.map(cell).join(' | ')} |`)].join('\n') : '_None recorded._');
@@ -75,12 +86,13 @@ const DOCS = {
       `## 6. Cost and benefit items\n${table(['Type', 'Year', 'Item', 'Category', 'Amount', 'Assumptions'], p.financials.map((f) => [f.kind, f.year, f.item, f.category, money(p, +f.amount || 0), f.notes]))}`,
       `## 7. Alignment to objectives\n${table(['ID', 'Objective', 'Target'], p.objectives.map((o) => [o.code, o.title, o.target]))}`,
       `## 8. Risks\n${table(['ID', 'Risk', 'Score', 'Mitigation'], p.raid.filter((r) => r.type === 'Risk').map((r) => [r.code, r.description, `${riskScore(r)} ${riskLevel(r)}`, r.response]))}`,
+      ...(p.vendors.criteria.length && p.vendors.options.length ? [`## Option / vendor assessment\nWeighted scoring on a 1–5 scale; the weighted score guides, not replaces, the decision.\n\n${table(['Criterion', 'Weight %', ...p.vendors.options.map((o) => o.name || 'Option')], p.vendors.criteria.map((c) => [c.name, c.weight, ...p.vendors.options.map((o) => o.scores?.[c.id] ?? '')]))}\n\n${table(['Rank', 'Option', 'Weighted score (of 5)'], vendorScores(p.vendors).map((r, i) => [i + 1, r.option.name || 'Option', r.score.toFixed(2)]))}`] : []),
       `## 9. Recommendation\n${or(p.businessCase.recommendation)}`,
       signoff(p),
     ];
   } },
 
-  strategy: { title: 'Strategy Analysis (SWOT, PESTLE, Gap)', audience: 'Sponsor, BA team', build: (p) => {
+  strategy: { title: 'Strategy Analysis', audience: 'Sponsor, BA team', build: (p) => {
     const sw = (c) => list(p.swot.filter((x) => x.category === c).map((x) => x.text));
     return [
       header(p, 'Strategy Analysis', 'Assesses the current state, the external environment and the gaps that the change must close.'),
@@ -88,6 +100,10 @@ const DOCS = {
       `## 3. PESTLE analysis\n${table(['Factor', 'Description', 'Impact', 'Response'], p.pestle.map((x) => [x.factor, x.text, x.impact, x.response]))}`,
       `## 4. Gap analysis\n${table(['ID', 'Area', 'Current state', 'Future state', 'Gap', 'Action', 'Priority'], p.gaps.map((g) => [g.code, g.area, g.asIs, g.toBe, g.gap, g.action, g.priority]))}`,
       `## 5. Current vs future processes\n${p.processes.map((x) => `### ${x.name} (${x.state})\n${mmd(D.processDiagram(p, x))}`).join('\n\n') || '_No processes modelled._'}`,
+      `## 6. Business Model Canvas\n${BMC_ROWS.some(([k]) => (p.bmc[k] || []).length) ? table(['Building block', 'Content'], BMC_ROWS.map(([k, t]) => [t, (p.bmc[k] || []).join('; ')])) : '_Not completed._'}`,
+      `## 7. Business capabilities\n${p.capabilities.length ? `${mmd(D.capabilityMap(p))}\n\n${table(['ID', 'Capability', 'Importance', 'Current', 'Target', 'Gap'], p.capabilities.map((c) => [c.code, c.name, c.importance, c.current, c.target, Math.max(0, (+c.target || 0) - (+c.current || 0))]))}` : '_None recorded._'}`,
+      `## 8. Root cause analysis\n${p.rootCauses.map((r) => `### ${r.code} ${r.problem}\n${mmd(D.fishbone(p, r))}\n\n**5 Whys**\n${ol(r.whys)}\n\n**Root cause:** ${or(r.rootCause, '—')}\n\n**Countermeasure:** ${or(r.countermeasure, '—')}`).join('\n\n') || '_None recorded._'}`,
+      `## 9. Objectives by balanced scorecard perspective\n${table(['Perspective', 'Objectives'], [...BSC, 'Not set'].map((b) => [b, p.objectives.filter((o) => (o.perspective || 'Not set') === b).map((o) => `${o.code} ${o.title}`).join('; ')]).filter((r) => r[1]))}`,
     ];
   } },
 
@@ -134,6 +150,7 @@ const DOCS = {
     `## 7. External interface requirements\n${reqTable(p, reqsOf(p, ['Interface']))}\n\n${table(['System', 'Direction', 'Protocol', 'Data', 'Frequency'], p.integrations.map((i) => [i.system, i.direction, i.protocol, i.data, i.frequency]))}`,
     `## 8. Business rules and decision logic\n${table(['ID', 'Rule', 'Requirements'], p.rules.map((r) => [r.code, `${r.name}: ${r.statement}`, codesOf(p.requirements, r.requirementIds)]))}\n\n${p.decisionTables.map(dtMarkdown).join('\n\n')}`,
     `## 9. State models\n${p.states.map((s) => `### ${s.name}\n${mmd(D.stateDiagram(p, s))}`).join('\n\n') || '_None._'}`,
+    `## 10. Roles and permissions\n${permissionTables(p)}`,
     signoff(p),
   ] },
 
@@ -277,6 +294,23 @@ const DOCS = {
       e.velocity ? `## 7. Agile forecast\n${e.openPoints} open story points at ${e.velocity} points per ${e.sprintWeeks}-week sprint = **${e.sprints} sprints**${e.agileEnd ? `, finishing about ${e.agileEnd}` : ''}.` : '',
       `## Method\n- Expected effort per item = (optimistic + 4 x most likely + pessimistic) / 6; standard deviation = (pessimistic - optimistic) / 6.\n- Phases run one after another; within a phase, roles work in parallel, so a phase lasts as long as its busiest role (effort / people).\n- Dates count working days only (${e.settings.workDays.map((d) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ')}), skipping ${e.settings.holidays.length} listed holiday(s).`,
       signoff(p),
+    ];
+  } },
+
+  baplan: { title: 'Business Analysis Plan & Performance', audience: 'Project manager, sponsor, BA team', build: (p) => {
+    const b = p.baPlan;
+    const reqs = p.requirements.filter((r) => r.status !== 'Rejected');
+    const clean = reqs.filter((r) => !lintRequirement(r, p).length).length;
+    return [
+      header(p, 'Business Analysis Plan', 'How the analysis will be done, who is involved, how decisions and changes are governed, and how BA performance is measured.'),
+      `## 2. Approach\n**${or(b.approach, '—')}**\n\n${or(b.approachWhy, '')}`,
+      `## 3. Stakeholder engagement\n${or(b.engagement, '')}\n\n${table(['Stakeholder', 'Role', 'Power', 'Interest', 'Engagement'], p.stakeholders.map((s) => [s.name, s.role, s.power, s.interest, s.power === 'High' ? (s.interest === 'High' ? 'Manage closely' : 'Keep satisfied') : s.interest === 'High' ? 'Keep informed' : 'Monitor']))}`,
+      `## 4. Governance\n- **Decision making and escalation:** ${or(b.governance, '—')}\n- **Who signs off requirements:** ${or(b.approvers, '—')}\n- **Change control:** ${or(b.changeControl, '—')}`,
+      `## 5. Information management\n- **Where and how requirements are kept:** ${or(b.information, '—')}\n- **Traceability:** ${or(b.traceability, '—')}\n- **Tools:** ${or(b.tools, '—')}`,
+      `## 6. Activities and timing\n${or(b.schedule, '_Not planned yet._')}\n\n${table(['ID', 'Date', 'Technique', 'Topic'], p.elicitation.map((e) => [e.code, e.date, e.technique, e.title]))}`,
+      `## 7. Performance measures\n${or(b.metrics, '')}\n\n${table(['Measure', 'Value'], [['Requirements passing quality checks', reqs.length ? `${clean} of ${reqs.length} (${Math.round((clean / reqs.length) * 100)}%)` : '—'], ['Open questions', p.questions.filter((q) => q.status === 'Open').length], ['Change requests', p.changes.length], ['Defects linked to requirements', p.defects.filter((d) => (d.requirementIds || []).length).length], ['Reviews held', p.reviews.length]])}`,
+      `## 8. Reviews and sign-offs\n${table(['ID', 'Work product', 'Type', 'Date', 'Outcome', 'Findings'], p.reviews.map((r) => [r.code, r.artefact, r.type, r.date, r.outcome, (r.findings || []).join('; ')]))}`,
+      `## 9. Lessons learned\n${table(['ID', 'Type', 'Lesson', 'Recommendation', 'Impact'], p.lessons.map((l) => [l.code, l.kind, l.title, l.recommendation, l.impact]))}`,
     ];
   } },
 

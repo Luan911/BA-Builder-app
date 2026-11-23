@@ -34,7 +34,9 @@ export const LAYERS = ['Presentation (UI)', 'Business logic / services', 'Integr
 export const CONTROLS = ['Text', 'Number', 'Currency', 'Date', 'Dropdown', 'Radio buttons', 'Checkbox', 'Text area', 'Email', 'Phone', 'File upload', 'Read-only', 'Button'];
 export const REQ_STATUS = ['Draft', 'Proposed', 'Approved', 'Implemented', 'Rejected'];
 export const STORY_STATUS = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'];
-export const ELICIT_TYPES = ['Interview', 'Workshop', 'Survey', 'Observation', 'Document analysis', 'Focus group', 'Brainstorming', 'Prototype review', 'Demo'];
+export const ELICIT_TYPES = ['Interview', 'Workshop', 'Survey', 'Observation', 'Document analysis', 'Focus group', 'Brainstorming', 'Prototype review', 'Demo', 'Collaborative game', 'Benchmarking / market analysis', 'Data analysis / mining', 'Interface analysis'];
+export const BSC = ['Financial', 'Customer', 'Internal process', 'Learning & growth'];
+export const CAUSE_CATS = ['People', 'Process', 'Technology', 'Data', 'Policy / rules', 'Environment'];
 export const ATTITUDES = ['Champion', 'Supporter', 'Neutral', 'Critic', 'Blocker'];
 export const STEP_KINDS = ['start', 'task', 'decision', 'fork', 'join', 'timer', 'message', 'subprocess', 'end'];
 export const FIELD_TYPES = ['string', 'text', 'int', 'decimal', 'boolean', 'date', 'datetime', 'uuid', 'email', 'enum', 'json'];
@@ -151,6 +153,17 @@ export function suggestRequirement(r) {
   return out;
 }
 
+/** Weighted vendor / option scoring: each option's score = Σ(weight × score) ÷ Σ weights, on the 1–5 scale. */
+export function vendorScores(v) {
+  const crit = (v.criteria || []).filter((c) => c.name);
+  const total = crit.reduce((a, c) => a + (+c.weight || 0), 0);
+  return (v.options || []).map((o) => {
+    const rated = crit.filter((c) => +o.scores?.[c.id] >= 1);
+    const sum = crit.reduce((a, c) => a + (+c.weight || 0) * (+o.scores?.[c.id] || 0), 0);
+    return { option: o, score: total ? sum / total : 0, percent: total ? (sum / (total * 5)) * 100 : 0, complete: rated.length === crit.length && crit.length > 0 };
+  }).sort((a, b) => b.score - a.score);
+}
+
 /** Business case maths: NPV, ROI, payback year. */
 export function businessCase(p) {
   const rate = (+p.businessCase.discountRate || 0) / 100;
@@ -215,11 +228,13 @@ export const COLLECTIONS = {
     title: 'Business objectives', singular: 'objective', prefix: 'OBJ', pad: 2,
     intro: 'SMART objectives the initiative must achieve. Every requirement should trace to one.',
     fields: [
-      { key: 'code', label: 'ID', req: true }, { key: 'title', label: 'Objective', req: true },
+      { key: 'code', label: 'ID', help: 'Leave blank to number automatically' }, { key: 'title', label: 'Objective', req: true },
       { key: 'kpi', label: 'KPI / measure', req: true }, { key: 'baseline', label: 'Baseline' },
       { key: 'target', label: 'Target', req: true, help: 'Include a number' }, { key: 'due', label: 'Achieve by', type: 'date' },
+      { key: 'perspective', label: 'Balanced scorecard perspective', type: 'select', options: BSC },
+      { key: 'actual', label: 'Actual result (after go-live)', help: 'Benefits tracking: the measured value' }, { key: 'measuredOn', label: 'Measured on', type: 'date' },
     ],
-    cols: [['ID', (x) => b(x.code)], ['Objective', (x) => b(x.title)], ['KPI', (x) => cut(x.kpi)], ['Baseline → target', (x) => `${cut(x.baseline, 30)} → ${cut(x.target, 30)}`], ['Requirements', (x, p) => String(p.requirements.filter((r) => (r.objectiveIds || []).includes(x.id)).length)]],
+    cols: [['ID', (x) => b(x.code)], ['Objective', (x) => b(x.title)], ['KPI', (x) => cut(x.kpi)], ['Baseline → target', (x) => `${cut(x.baseline, 30)} → ${cut(x.target, 30)}`], ['Actual', (x) => (x.actual ? `${esc(x.actual)}${x.measuredOn ? `<div class="muted small">${esc(x.measuredOn)}</div>` : ''}` : '<span class="muted">—</span>')], ['Requirements', (x, p) => String(p.requirements.filter((r) => (r.objectiveIds || []).includes(x.id)).length)]],
   },
   swot: {
     title: 'SWOT analysis', singular: 'SWOT item',
@@ -533,9 +548,40 @@ export const COLLECTIONS = {
     defaults: () => ({ status: 'New', environment: 'UAT', severity: 'Medium', priority: 'P2 — this release', requirementIds: [], steps: [], date: today() }),
     filters: { status: ['New', 'Open', 'In progress', 'Fixed — ready to retest', 'Closed', 'Rejected', 'Deferred'], severity: ['Critical', 'High', 'Medium', 'Low'] },
   },
+  capabilities: {
+    title: 'Business capabilities', singular: 'capability', prefix: 'CAP', pad: 2,
+    intro: 'What the business must be able to do, independent of who does it or how. Rate today\'s maturity against the target to find where to invest (business capability analysis).',
+    links: [['#/diagrams/capabilities', 'Capability map']],
+    fields: [{ key: 'code', label: 'ID' }, { key: 'name', label: 'Capability', req: true, ph: 'Noun phrase, e.g. Credit decisioning' }, { key: 'parent', label: 'Part of', type: 'select', options: (p) => p.capabilities.map((c) => ({ value: c.id, label: c.name })) }, { key: 'importance', label: 'Strategic importance', type: 'select', options: ['High', 'Medium', 'Low'] }, { key: 'current', label: 'Current maturity (1–5)', type: 'number', min: 1, max: 5 }, { key: 'target', label: 'Target maturity (1–5)', type: 'number', min: 1, max: 5 }, { key: 'owner', label: 'Owner', type: 'select', options: o.stakeholders }, { key: 'notes', label: 'Notes / pain points', type: 'textarea', rows: 2 }],
+    cols: [['ID', (x) => b(x.code)], ['Capability', (x, p) => `${b(x.name)}${x.parent ? `<div class="muted small">in ${esc(byId(p.capabilities, x.parent)?.name || '')}</div>` : ''}`], ['Importance', (x) => autoPill(x.importance)], ['Maturity', (x) => (x.current || x.target ? esc(`${x.current || '?'} → ${x.target || '?'}`) : '—')], ['Gap', (x) => { const g = (+x.target || 0) - (+x.current || 0); return g > 0 ? pill(`${g}`, g >= 2 ? 'err' : 'warn') : pill('0', 'ok'); }]],
+    defaults: () => ({ importance: 'Medium', current: 2, target: 3 }),
+    validate: (x) => ([x.current, x.target].some((v) => v !== '' && v != null && !(+v >= 1 && +v <= 5)) ? 'Maturity is rated from 1 to 5' : ''),
+  },
+  rootCauses: {
+    title: 'Root cause analysis', singular: 'problem', prefix: 'RCA', pad: 2,
+    intro: 'Ask "why?" until you reach a cause you can act on (5 Whys), and group contributing causes by category (fishbone / Ishikawa). Treat the cause, not the symptom.',
+    links: [['#/diagrams/fishbone', 'Fishbone diagrams']],
+    fields: [{ key: 'code', label: 'ID' }, { key: 'problem', label: 'Problem (the effect)', req: true, full: true, ph: 'e.g. 1 in 12 applications are reworked' }, { key: 'whys', label: '5 Whys — each line answers "why?" about the line above', type: 'list', rows: 5 }, { key: 'rootCause', label: 'Root cause', type: 'textarea', rows: 2 }, { key: 'causes', label: 'Contributing causes (fishbone)', type: 'rows', add: 'Add cause', cols: [{ key: 'category', label: 'Category', type: 'select', options: CAUSE_CATS, w: '140px' }, { key: 'cause', label: 'Cause', w: '2fr' }] }, { key: 'countermeasure', label: 'Countermeasure / requirement', type: 'textarea', rows: 2 }, { key: 'requirementIds', label: 'Addressed by requirements', type: 'multi', options: o.requirements }],
+    cols: [['ID', (x) => b(x.code)], ['Problem', (x) => `${b(x.problem)}<div class="muted small">${cut(x.rootCause, 90)}</div>`], ['Whys', (x) => String((x.whys || []).length)], ['Causes', (x) => String((x.causes || []).length)], ['Addressed by', (x, p) => codePills(p.requirements, x.requirementIds)]],
+    defaults: () => ({ whys: [], causes: [], requirementIds: [] }),
+  },
+  reviews: {
+    title: 'Reviews & sign-offs', singular: 'review', prefix: 'REV', pad: 2,
+    intro: 'Walkthroughs, inspections and approvals of BA work products — who reviewed what, what they found, and the decision.',
+    fields: [{ key: 'code', label: 'ID' }, { key: 'artefact', label: 'Work product reviewed', req: true, ph: 'e.g. SRS v0.4, Use case UC-01' }, { key: 'type', label: 'Review type', type: 'select', options: ['Walkthrough', 'Inspection', 'Desk check', 'Peer review', 'Formal approval'] }, { key: 'date', label: 'Date', type: 'date' }, { key: 'participants', label: 'Reviewers', type: 'multi', options: o.stakeholders }, { key: 'findings', label: 'Findings (one per line)', type: 'list', rows: 3 }, { key: 'outcome', label: 'Outcome', type: 'select', options: ['Approved', 'Approved with changes', 'Rework needed', 'Rejected'] }, { key: 'notes', label: 'Notes', type: 'textarea', rows: 2 }],
+    cols: [['ID', (x) => b(x.code)], ['Work product', (x) => `${b(x.artefact)}<div class="muted small">${esc(x.type || '')}</div>`], ['Date', (x) => esc(x.date || '')], ['Findings', (x) => String((x.findings || []).length)], ['Outcome', (x) => autoPill(x.outcome || '—')]],
+    defaults: () => ({ type: 'Walkthrough', date: today(), participants: [], findings: [] }),
+  },
+  lessons: {
+    title: 'Lessons learned', singular: 'lesson', prefix: 'LL', pad: 2,
+    intro: 'What went well, what did not, and what to do differently — captured during the work, not only at the end.',
+    fields: [{ key: 'code', label: 'ID' }, { key: 'kind', label: 'Type', type: 'select', options: ['Keep doing', 'Stop doing', 'Start doing', 'Observation'], blank: false }, { key: 'title', label: 'Lesson', req: true, full: true }, { key: 'context', label: 'What happened', type: 'textarea', rows: 2 }, { key: 'impact', label: 'Impact', type: 'select', options: ['High', 'Medium', 'Low'] }, { key: 'recommendation', label: 'Recommendation', type: 'textarea', rows: 2 }, { key: 'owner', label: 'Owner', type: 'select', options: o.stakeholders }, { key: 'date', label: 'Date', type: 'date' }],
+    cols: [['ID', (x) => b(x.code)], ['Lesson', (x) => `${b(x.title)}<div class="muted small">${cut(x.recommendation, 90)}</div>`], ['Type', (x) => pill(x.kind, x.kind === 'Stop doing' ? 'err' : x.kind === 'Keep doing' ? 'ok' : 'info')], ['Impact', (x) => autoPill(x.impact || '—')]],
+    defaults: () => ({ kind: 'Keep doing', impact: 'Medium', date: today() }),
+  },
   glossary: {
     title: 'Glossary', singular: 'term',
-    fields: [{ key: 'term', label: 'Term', req: true }, { key: 'synonyms', label: 'Synonyms / acronym' }, { key: 'definition', label: 'Definition', type: 'textarea', req: true }],
+    fields: [{ key: 'term', label: 'Term', req: true }, { key: 'synonyms', label: 'Synonyms / acronym' }, { key: 'definition', label: 'Definition', type: 'textarea', req: true }, { key: 'related', label: 'Related terms (concept model)', type: 'rows', add: 'Add relationship', cols: [{ key: 'verb', label: 'Relationship', ph: 'e.g. has, is a, approves', w: '1fr' }, { key: 'to', label: 'Term', type: 'select', options: (p) => p.glossary.map((g) => ({ value: g.id, label: g.term })), w: '1.2fr' }] }],
     cols: [['Term', (x) => b(x.term)], ['Definition', (x) => cut(x.definition, 160)], ['Synonyms', (x) => cut(x.synonyms, 40)]],
     sort: (a, c) => String(a.term).localeCompare(String(c.term)),
   },
@@ -552,6 +598,10 @@ export function blankProject(name = '') {
     businessCase: { discountRate: 10, years: 5, options: '', recommendation: '', currency: 'R' },
     estimate: { startDate: '', contingency: 15, hoursPerDay: 8, workDays: [1, 2, 3, 4, 5], holidays: '', velocity: 0, sprintWeeks: 2 },
     raci: {}, // { deliverable: { stakeholderId: 'R' | 'A' | 'C' | 'I' } }
+    bmc: { partners: [], activities: [], resources: [], value: [], relationships: [], channels: [], segments: [], costs: [], revenue: [] },
+    baPlan: { approach: 'Adaptive (Agile)', approachWhy: '', engagement: '', governance: '', changeControl: '', approvers: '', information: '', traceability: '', tools: '', metrics: '', schedule: '' },
+    permissions: {}, // { personaId: { 'uc:<id>': true, 'en:<id>': 'CRUD' } }
+    vendors: { criteria: [], options: [] }, // criteria: { id, name, weight }, options: { id, name, notes, scores: { criterionId: 1–5 } }
     raciItems: ['Business case', 'Requirements baseline', 'Solution design', 'UAT', 'Go-live'],
     diagrams: [], // Diagram Studio: { id, name, code }
     canvases: [], // Whiteboard: { id, name, nodes, edges }
@@ -564,7 +614,10 @@ export function blankProject(name = '') {
 export function normalize(input) {
   const base = blankProject();
   const p = { ...base, ...(input && typeof input === 'object' ? input : {}) };
-  for (const k of ['meta', 'charter', 'businessCase', 'estimate']) p[k] = { ...base[k], ...(p[k] || {}) };
+  for (const k of ['meta', 'charter', 'businessCase', 'estimate', 'bmc', 'baPlan', 'vendors']) p[k] = { ...base[k], ...(p[k] && typeof p[k] === 'object' && !Array.isArray(p[k]) ? p[k] : {}) };
+  for (const k of Object.keys(base.bmc)) if (!Array.isArray(p.bmc[k])) p.bmc[k] = String(p.bmc[k] || '').split('\n').filter(Boolean);
+  for (const k of ['criteria', 'options']) if (!Array.isArray(p.vendors[k])) p.vendors[k] = [];
+  if (!p.permissions || typeof p.permissions !== 'object' || Array.isArray(p.permissions)) p.permissions = {};
   for (const k of [...COLLECTION_KEYS, 'diagrams', 'canvases', 'raciItems']) if (!Array.isArray(p[k])) p[k] = base[k];
   if (!p.raci || typeof p.raci !== 'object') p.raci = {};
   for (const k of COLLECTION_KEYS) {

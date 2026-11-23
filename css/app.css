@@ -272,3 +272,10 @@ select { max-width: 100%; }
 /* SQL workbench */
 .sqlgrid { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
 @media (max-width: 900px) { .sqlgrid { grid-template-columns: minmax(0, 1fr); } }
+
+/* Business Model Canvas: the classic 5-column layout */
+.bmc { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-areas: 'partners activities value relationships segments' 'partners resources value channels segments' 'costs costs costs revenue revenue'; gap: 10px; margin-bottom: 10px; }
+.bmc .card { margin: 0; }
+.bmc-partners { grid-area: partners; } .bmc-activities { grid-area: activities; } .bmc-resources { grid-area: resources; } .bmc-value { grid-area: value; } .bmc-relationships { grid-area: relationships; } .bmc-channels { grid-area: channels; } .bmc-segments { grid-area: segments; } .bmc-costs { grid-area: costs; } .bmc-revenue { grid-area: revenue; }
+@media (max-width: 1100px) { .bmc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'value segments' 'relationships channels' 'activities resources' 'partners partners' 'costs revenue'; } }
+@media (max-width: 640px) { .bmc { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'value' 'segments' 'relationships' 'channels' 'activities' 'resources' 'partners' 'costs' 'revenue'; } }

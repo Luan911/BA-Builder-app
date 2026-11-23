@@ -424,5 +424,58 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('practice bank: every question has a category, outline and app link', BANK.length >= 30 && BANK.every((q) => CATEGORIES.includes(q[0]) && q[3].length > 60 && /^#\//.test(q[5][0])));
 }
 
+// ---------- BABOK techniques and the masterclass ----------
+{
+  const M = await import('../js/model.js');
+  const G = await import('../js/gen/diagrams.js');
+  const { buildDoc, DOC_LIST } = await import('../js/gen/docs.js');
+  const C = await import('../js/masterclass.js');
+  const { BANK } = await import('../js/practice-bank.js');
+  // weighted vendor scoring
+  const v = { criteria: [{ id: 'a', name: 'Fit', weight: 60 }, { id: 'b', name: 'Cost', weight: 40 }], options: [{ id: 'x', name: 'X', scores: { a: 5, b: 1 } }, { id: 'y', name: 'Y', scores: { a: 3, b: 5 } }, { id: 'z', name: 'Z', scores: { a: 4 } }] };
+  const r = M.vendorScores(v);
+  close('vendor score X = (5×60 + 1×40) / 100', r.find((x) => x.option.id === 'x').score, 3.4);
+  close('vendor score Y = (3×60 + 5×40) / 100', r.find((x) => x.option.id === 'y').score, 3.8);
+  eq('vendors ranked highest first', r.map((x) => x.option.id), ['y', 'x', 'z']);
+  eq('partly scored option is flagged', r.find((x) => x.option.id === 'z').complete, false);
+  eq('no criteria → zero, no crash', M.vendorScores({ criteria: [], options: [{ id: 'q', scores: {} }] })[0].score, 0);
+  // robustness of the new project objects
+  const n = M.normalize({ bmc: { value: 'A\nB', segments: null }, vendors: 'oops', permissions: [], baPlan: null });
+  eq('BMC text is turned into lists', [n.bmc.value, n.bmc.segments], [['A', 'B'], []]);
+  t('bad vendors / permissions / plan are repaired', Array.isArray(n.vendors.criteria) && !Array.isArray(n.permissions) && typeof n.permissions === 'object' && n.baPlan.approach);
+  eq('capability maturity must be 1–5', !!M.COLLECTIONS.capabilities.validate({ current: 7 }), true);
+  // sample content and outputs
+  const s = sampleProject();
+  t('capability map colours gaps', /CAP|Credit decisioning/.test(G.capabilityMap(s)) && /:::big/.test(G.capabilityMap(s)));
+  t('fishbone links causes to the problem and draws the 5 Whys to the root cause', /C0 --> P/.test(G.fishbone(s, s.rootCauses[0])) && /W3 --> RC/.test(G.fishbone(s, s.rootCauses[0])));
+  t('concept model draws glossary relationships', /G_g1 -->\|"is assessed for each"\| G_g5/.test(G.conceptModel(s)));
+  t('functional decomposition from epics', /^mindmap/.test(G.decomposition(s)) && G.decomposition(s).split('\n').length > 4);
+  const srs = buildDoc(s, 'srs').markdown;
+  t('SRS has a roles & permissions section with CRUD', /## 10\. Roles and permissions/.test(srs) && /\| Application \|/.test(srs) && /\bCR\b/.test(srs));
+  const strat = buildDoc(s, 'strategy').markdown;
+  t('strategy document has BMC, capabilities, root cause and balanced scorecard', ['Business Model Canvas', 'Business capabilities', 'Root cause analysis', 'balanced scorecard'].every((k) => strat.includes(k)));
+  t('business case includes the weighted option assessment', /Option \/ vendor assessment/.test(buildDoc(s, 'businesscase').markdown) && /4\.10/.test(buildDoc(s, 'businesscase').markdown));
+  t('BA plan document covers approach, governance, performance, reviews and lessons', ['## 2. Approach', '## 4. Governance', '## 7. Performance measures', 'REV-01', 'LL-01'].every((k) => buildDoc(s, 'baplan').markdown.includes(k)));
+  // masterclass integrity
+  const lessons = C.lessonList();
+  eq('50 BABOK techniques, no duplicates', [C.TECHNIQUES.length, new Set(C.TECHNIQUES.map((x) => x[0])).size], [50, 50]);
+  t('every lesson has content, a quiz with a valid answer and known sources', lessons.length >= 20 && lessons.every((l) => l.intro.length > 80 && l.points.length >= 3 && l.how.length && l.quiz.length && l.quiz.every((q) => q[2] >= 0 && q[2] < q[1].length && q[3]) && l.sources.every((k) => C.SOURCES[k])));
+  t('lesson ids are unique', new Set(lessons.map((l) => l.id)).size === lessons.length);
+  // every in-app link (masterclass, technique library, practice bank) points at a real screen
+  const docs = new Set(DOC_LIST.map((d) => d.id)), diags = new Set([...G.DIAGRAMS.map((d) => d.id), 'focus']);
+  const pages = new Set(['', 'srs', 'charter', 'strategy', 'business-case', 'estimate', 'stakeholders', 'board', 'prioritise', 'trace', 'decision-tables', 'data', 'normalise', 'sql', 'practice', 'masterclass', 'techniques', 'bmc', 'ba-plan', 'permissions', 'vendors', 'diagrams', 'studio', 'canvas', 'docs', 'settings']);
+  const valid = (href) => {
+    const [a, b] = href.replace(/^#\/?/, '').split('/');
+    if (a === 'c') return !!M.COLLECTIONS[b];
+    if (a === 'docs') return !b || docs.has(b);
+    if (a === 'diagrams') return !b || diags.has(b.split(':')[0]);
+    if (a === 'srs') return !b || (+b >= 1 && +b <= 10);
+    return pages.has(a);
+  };
+  const links = [...lessons.flatMap((l) => l.try.map((x) => x[0])), ...C.TECHNIQUES.map((x) => x[2]), ...BANK.map((q) => q[5][0])];
+  const broken = links.filter((h) => !valid(h));
+  eq('every in-app link points at a real screen', broken, []);
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

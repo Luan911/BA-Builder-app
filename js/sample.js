@@ -17,9 +17,10 @@ export function sampleProject() {
     },
     businessCase: { discountRate: 11, years: 5, currency: 'R', options: 'Option A: Do nothing.\nOption B: Buy a SaaS loan origination platform.\nOption C: Build on the existing digital banking platform (recommended).', recommendation: 'Proceed with Option C: highest NPV, reuses existing identity and payment components, and keeps data in-country.' },
     objectives: [
-      { id: 'o1', code: 'OBJ-01', title: 'Cut time to decision', kpi: 'Median minutes from submit to decision', baseline: '5 working days', target: '< 10 minutes', due: '2027-12-31' },
-      { id: 'o2', code: 'OBJ-02', title: 'Grow loan book through digital channel', kpi: 'Monthly digital loan disbursements', baseline: 'R 0', target: 'R 40m per month', due: '2028-06-30' },
-      { id: 'o3', code: 'OBJ-03', title: 'Eliminate re-keying', kpi: 'Applications re-keyed manually', baseline: '100%', target: '0%', due: '2027-09-30' },
+      { id: 'o1', perspective: 'Customer', code: 'OBJ-01', title: 'Cut time to decision', kpi: 'Median minutes from submit to decision', baseline: '5 working days', target: '< 10 minutes', due: '2027-12-31' },
+      { id: 'o2', perspective: 'Financial', code: 'OBJ-02', title: 'Grow loan book through digital channel', kpi: 'Monthly digital loan disbursements', baseline: 'R 0', target: 'R 40m per month', due: '2028-06-30' },
+      { id: 'o3', perspective: 'Internal process', code: 'OBJ-03', title: 'Eliminate re-keying', kpi: 'Applications re-keyed manually', baseline: '100%', target: '0%', due: '2027-09-30' },
+      { id: 'o4', perspective: 'Learning & growth', code: 'OBJ-04', title: 'Upskill credit officers on the referral workbench', kpi: 'Credit officers trained and certified', baseline: '0 of 24', target: '24 of 24 before go-live', due: '2027-05-31' },
     ],
     swot: [
       { category: 'Strength', text: 'Large existing customer base with verified digital identities' },
@@ -245,11 +246,48 @@ export function sampleProject() {
     queries: [
       { id: 'q1', code: 'Q-01', name: 'Applications per status', purpose: 'Checks the decision mix against the target auto-decision rate (OBJ-02).', sql: 'SELECT "status", COUNT(*) AS total\nFROM "Application"\nGROUP BY "status"\nORDER BY total DESC;', requirementIds: [] },
     ],
+    bmc: {
+      segments: ['Existing retail customers with a salary account', 'Digitally active 25–45 year olds'],
+      value: ['Decision in minutes, not days', 'Know the repayment before applying', 'Apply from the phone, no branch visit'],
+      channels: ['Banking app', 'Internet banking', 'Branch (assisted)'],
+      relationships: ['Self-service with chat support', 'Credit officer for referred cases'],
+      revenue: ['Interest on personal loans', 'Initiation and service fees (NCA caps)'],
+      resources: ['Customer data and transaction history', 'Credit decision rules', 'Digital banking platform'],
+      activities: ['Credit assessment', 'Collections', 'Product and pricing management'],
+      partners: ['Credit bureau', 'E-signature provider'],
+      costs: ['Bureau checks per application', 'Platform build and run', 'Credit losses'],
+    },
+    baPlan: { approach: 'Hybrid', approachWhy: 'Regulated credit rules and integrations need an approved baseline; the customer journey is refined in two-week sprints with user feedback.', engagement: 'Weekly sponsor check-in; fortnightly sprint reviews with branch and credit operations; credit policy workshops when rules change.', governance: 'Product owner decides scope within the release; changes affecting credit policy go to the Credit Risk Manager; budget or date changes go to the steering committee.', approvers: 'Head of Retail Lending (sponsor), Credit Risk Manager (credit rules)', changeControl: 'Change requests logged in BA Builder, impact analysed within 3 working days, decided at the weekly change board.', information: 'All requirements, models and decisions in BA Builder; exported documents versioned in the project SharePoint site.', traceability: 'Objective → requirement → story → test for all Must requirements; impact analysis before every change.', tools: 'BA Builder, Jira, Confluence, Postman', schedule: 'Discovery Oct–Nov 2026; requirements baseline v1.0 by 15 Dec 2026; sprint refinement every Tuesday; UAT Apr 2027.', metrics: 'Requirements passing quality checks ≥ 95%; fewer than 5% of defects caused by unclear requirements; sponsor satisfaction ≥ 4 of 5.' },
+    permissions: { p1: { 'uc:u1': true, 'uc:u3': true, 'en:en1': 'RU', 'en:en2': 'CR', 'en:en4': 'CR' }, p2: { 'uc:u2': true, 'en:en1': 'R', 'en:en2': 'RU', 'en:en3': 'R', 'en:en4': 'R' }, p5: { 'uc:u2': true, 'uc:u4': true, 'en:en1': 'R', 'en:en2': 'RU', 'en:en3': 'R', 'en:en4': 'RD' } },
+    vendors: {
+      criteria: [{ id: 'cr1', name: 'Fit to requirements', weight: 35 }, { id: 'cr2', name: 'Total cost of ownership (5 years)', weight: 25 }, { id: 'cr3', name: 'Data stays in-country (POPIA)', weight: 20 }, { id: 'cr4', name: 'Time to implement', weight: 10 }, { id: 'cr5', name: 'Vendor stability and support', weight: 10 }],
+      options: [{ id: 'op1', name: 'Build on digital banking platform', scores: { cr1: 4, cr2: 4, cr3: 5, cr4: 3, cr5: 4 } }, { id: 'op2', name: 'SaaS loan origination platform', scores: { cr1: 4, cr2: 3, cr3: 2, cr4: 4, cr5: 4 } }, { id: 'op3', name: 'Do nothing (improve paper process)', scores: { cr1: 1, cr2: 5, cr3: 5, cr4: 5, cr5: 3 } }],
+    },
+    capabilities: [
+      { id: 'k1', code: 'CAP-01', name: 'Customer onboarding', importance: 'High', current: 3, target: 4 },
+      { id: 'k2', code: 'CAP-02', name: 'Credit decisioning', importance: 'High', current: 2, target: 4 },
+      { id: 'k3', code: 'CAP-03', name: 'Affordability assessment', parent: 'k2', importance: 'High', current: 2, target: 4 },
+      { id: 'k4', code: 'CAP-04', name: 'Bureau integration', parent: 'k2', importance: 'High', current: 1, target: 4 },
+      { id: 'k5', code: 'CAP-05', name: 'Loan fulfilment', importance: 'Medium', current: 3, target: 4 },
+      { id: 'k6', code: 'CAP-06', name: 'Contract e-signature', parent: 'k5', importance: 'Medium', current: 1, target: 3 },
+    ],
+    rootCauses: [
+      { id: 'rc1', code: 'RCA-01', problem: '1 in 12 applications are reworked', whys: ['Application data is wrong in the core system', 'It was typed in again from a paper form', 'Branches have no system to capture applications', 'The digital channel was never extended to lending'], rootCause: 'There is no digital capture of loan applications, so all data is re-keyed by hand.', causes: [{ category: 'Process', cause: 'Paper form re-keyed by branch staff' }, { category: 'Technology', cause: 'No lending journey in the banking app' }, { category: 'People', cause: 'Staff not trained on validation rules' }, { category: 'Data', cause: 'No validation at capture' }], countermeasure: 'Digital application with field validation (FR-001) and no re-keying (OBJ-03).', requirementIds: ['r3'] },
+    ],
+    reviews: [
+      { id: 'rv1', code: 'REV-01', artefact: 'SRS v0.4 — functional requirements', type: 'Walkthrough', date: '2026-11-05', participants: ['s1', 's2'], findings: ['FR-003 needs the maximum amount', 'Add the unhappy path for bureau timeouts'], outcome: 'Approved with changes' },
+    ],
+    lessons: [
+      { id: 'll1', code: 'LL-01', kind: 'Keep doing', title: 'Observe branch staff before workshops', context: 'Two days in branches revealed the re-keying workaround nobody mentioned in interviews.', impact: 'High', recommendation: 'Schedule observation early in discovery for any operational process.', owner: 's3', date: '2026-10-20' },
+      { id: 'll2', code: 'LL-02', kind: 'Start doing', title: 'Agree credit rule owners up front', context: 'Rule changes stalled for a week because no one owned the affordability rules.', impact: 'Medium', recommendation: 'Name a rule owner for each business rule in the first month.', owner: 's2', date: '2026-11-12' },
+    ],
     glossary: [
-      { term: 'Affordability', definition: 'Assessment of whether the applicant can repay the loan after essential expenses, as required by the National Credit Act.' },
-      { term: 'Referral', definition: 'An application that the rules engine neither approves nor declines; a credit officer decides it.' },
-      { term: 'Bureau score', synonyms: 'Credit score', definition: 'A number from the credit bureau that predicts the likelihood of default.' },
-      { term: 'NCA', synonyms: 'National Credit Act', definition: 'South African legislation regulating consumer credit.' },
+      { id: 'g5', term: 'Application', definition: 'A customer\'s request for a personal loan, from submission to decision.', related: [{ verb: 'may become a', to: 'g2' }] },
+      { id: 'g6', term: 'Credit officer', definition: 'Bank employee who decides referred applications within their mandate.', related: [] },
+      { id: 'g1', term: 'Affordability', related: [{ verb: 'is assessed for each', to: 'g5' }], definition: 'Assessment of whether the applicant can repay the loan after essential expenses, as required by the National Credit Act.' },
+      { id: 'g2', term: 'Referral', related: [{ verb: 'is decided by a', to: 'g6' }], definition: 'An application that the rules engine neither approves nor declines; a credit officer decides it.' },
+      { id: 'g3', term: 'Bureau score', related: [{ verb: 'informs the decision on an', to: 'g5' }], synonyms: 'Credit score', definition: 'A number from the credit bureau that predicts the likelihood of default.' },
+      { id: 'g4', term: 'NCA', related: [{ verb: 'requires an', to: 'g1' }], synonyms: 'National Credit Act', definition: 'South African legislation regulating consumer credit.' },
     ],
     diagrams: [
       { id: 'dg1', name: 'Customer journey — apply for a loan', code: 'journey\n  title Applying for a personal loan\n  section Discover\n    See loan offer in app: 4: Applicant\n    Use repayment calculator: 5: Applicant\n  section Apply\n    Enter details: 3: Applicant\n    Upload payslip: 2: Applicant\n  section Decision\n    Receive instant decision: 5: Applicant, System\n    E-sign contract: 4: Applicant' },
