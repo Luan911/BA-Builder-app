@@ -1,5 +1,5 @@
 // App shell: navigation, routing, project switcher, undo.
-import { load, project, projects, subscribe, switchProject, undo, saved } from './store.js';
+import { load, project, projects, subscribe, switchProject, undo, saved, getSettings, saveSettings } from './store.js';
 import { esc, $, $$, toast } from './ui.js';
 import { renderCollection } from './views/collection.js';
 import { renderDashboard } from './views/dashboard.js';
@@ -23,10 +23,11 @@ import { renderDocuments } from './views/documents.js';
 import { renderSettings } from './views/settings.js';
 import { renderDecisionTables } from './views/decisiontables.js';
 import { renderWizard, startNewSrs } from './views/wizard.js';
+import { openJump } from './views/jump.js';
 
 // [route, label, count-key]
 const NAV = [
-  ['Overview', [['', 'Dashboard'], ['srs', 'SRS wizard (step by step)'], ['charter', 'Project charter'], ['ba-plan', 'BA plan']]],
+  ['Overview', [['', 'Dashboard'], ['srs', 'SRS checklist (step by step)'], ['charter', 'Project brief'], ['ba-plan', 'BA plan']]],
   ['Strategy', [['c/objectives', 'Objectives', 'objectives'], ['strategy', 'SWOT & PESTLE'], ['bmc', 'Business Model Canvas'], ['c/capabilities', 'Capabilities', 'capabilities'], ['c/rootCauses', 'Root cause analysis', 'rootCauses'], ['c/gaps', 'Gap analysis', 'gaps'], ['vendors', 'Vendor & option assessment'], ['business-case', 'Business case'], ['estimate', 'Cost & time estimate', 'workItems']]],
   ['Stakeholders', [['stakeholders', 'Stakeholders & RACI', 'stakeholders'], ['c/personas', 'Personas & actors', 'personas'], ['c/elicitation', 'Elicitation sessions', 'elicitation'], ['c/questions', 'Open questions', 'questions']]],
   ['Requirements', [['c/requirements', 'Requirements', 'requirements'], ['c/stories', 'User stories', 'stories'], ['board', 'Backlog board'], ['prioritise', 'Prioritisation'], ['c/usecases', 'Use cases', 'usecases'], ['c/rules', 'Business rules', 'rules'], ['decision-tables', 'Decision tables', 'decisionTables'], ['c/tests', 'Test cases (SIT / UAT)', 'tests'], ['c/defects', 'Defect log', 'defects'], ['permissions', 'Roles & permissions'], ['trace', 'Traceability']]],
@@ -36,13 +37,30 @@ const NAV = [
   ['Outputs', [['diagrams', 'Diagrams'], ['studio', 'Diagram studio', 'diagrams'], ['canvas', 'Whiteboard', 'canvases'], ['docs', 'Documents'], ['settings', 'Projects & export']]],
 ];
 
+// Simple mode shows the screens a software BA uses every day; "Show all tools" reveals the rest.
+export const SIMPLE = new Set(['', 'srs', 'charter', 'c/objectives', 'stakeholders', 'c/personas', 'c/elicitation', 'c/questions', 'c/requirements', 'c/stories', 'board', 'c/rules', 'decision-tables', 'c/tests', 'trace', 'c/processes', 'data', 'c/screens', 'c/apis', 'c/integrations', 'sql', 'c/raid', 'c/decisions', 'c/changes', 'c/glossary', 'diagrams', 'docs', 'settings']);
+export { NAV };
+
+/** The sidebar entries to show for the current mode and the project's specification style. */
+export function visibleNav(full, specStyle) {
+  const hideSpec = (r) => (specStyle === 'User stories' && r === 'c/requirements') || (specStyle === 'Requirements' && ['c/stories', 'board'].includes(r));
+  return NAV.map(([g, items]) => [g, items.filter(([r]) => (full || SIMPLE.has(r)) && (full || !hideSpec(r)))]).filter(([, items]) => items.length);
+}
+
+function navHtml() {
+  const full = getSettings().mode === 'full';
+  const hidden = NAV.flatMap(([, i]) => i).length - visibleNav(full, project().meta.specStyle).flatMap(([, i]) => i).length;
+  return visibleNav(full, project().meta.specStyle).map(([g, items]) => `<div class="nav-group"><div class="nav-label">${esc(g)}</div>${items.map(([r, l, k]) => `<a class="nav" href="#/${r}" data-r="${r}">${esc(l)}${k ? `<span class="cnt" data-cnt="${k}"></span>` : ''}</a>`).join('')}</div>`).join('') +
+    `<div class="nav-group"><button class="btn sm ghost" data-mode style="width:100%;justify-content:center" title="${full ? 'Show only the everyday screens' : 'Show strategy, estimating, architecture, learning and more'}">${full ? '← Simple mode' : `Show all tools (${hidden} more) →`}</button><div class="small muted" style="padding:4px 10px 0;text-align:center">Ctrl + K to jump anywhere</div></div>`;
+}
+
 function shell() {
   $('#app').innerHTML = `
     <div class="layout">
       <aside class="side" aria-label="Navigation">
         <div class="brand"><i>BA</i> BA Builder</div>
         <div class="cta"><button class="btn primary" data-newsrs style="width:100%;justify-content:center">+ New SRS</button></div>
-        <nav>${NAV.map(([g, items]) => `<div class="nav-group"><div class="nav-label">${esc(g)}</div>${items.map(([r, l, k]) => `<a class="nav" href="#/${r}" data-r="${r}">${esc(l)}${k ? `<span class="cnt" data-cnt="${k}"></span>` : ''}</a>`).join('')}</div>`).join('')}</nav>
+        <nav data-nav></nav>
       </aside>
       <div class="scrim" data-scrim></div>
       <div class="main">
@@ -63,8 +81,17 @@ function shell() {
   $('[data-proj]').onchange = (e) => (e.target.value === '__manage' ? (location.hash = '#/settings') : switchProject(e.target.value));
 }
 
+let navKey = '';
 function chrome() {
   const p = project();
+  // rebuild the sidebar only when the mode or specification style changes
+  const key = `${getSettings().mode}|${p.meta.specStyle || ''}`;
+  if (key !== navKey) {
+    navKey = key;
+    $('[data-nav]').innerHTML = navHtml();
+    $('[data-mode]').onclick = () => saveSettings({ mode: getSettings().mode === 'full' ? 'simple' : 'full' });
+    markActive();
+  }
   $('[data-proj]').innerHTML = projects().map((x) => `<option value="${esc(x.id)}" ${x.id === p.id ? 'selected' : ''}>${esc(x.meta.name || 'Untitled project')}</option>`).join('') + '<option value="__manage">Manage projects…</option>';
   $('[data-saved]').textContent = saved ? 'All changes saved' : '⚠ Not saved — browser storage is full or blocked';
   for (const el of $$('[data-cnt]')) el.textContent = (p[el.dataset.cnt] || []).length || '';
@@ -108,9 +135,14 @@ function route() {
     console.error(e);
     v.innerHTML = `<div class="callout warn">This page could not be shown: ${esc(e.message)}</div>`;
   }
+  markActive();
+  document.body.classList.remove('nav-open');
+}
+
+function markActive() {
+  const [a = '', b] = location.hash.replace(/^#\/?/, '').split('/');
   const cur = a === 'c' ? `c/${b}` : a;
   $$('a.nav').forEach((l) => l.classList.toggle('active', l.dataset.r === cur));
-  document.body.classList.remove('nav-open');
 }
 
 function renderDataModel(v) {
@@ -157,6 +189,11 @@ function start() {
   });
   document.addEventListener('keydown', (e) => {
     const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '');
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (!document.querySelector('.backdrop')) openJump(NAV);
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing && !document.querySelector('.backdrop')) {
       e.preventDefault();
       toast(undo() ? 'Undone' : 'Nothing to undo');

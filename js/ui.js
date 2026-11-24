@@ -83,10 +83,14 @@ function control(f, v, p) {
   }
 }
 
+const hasValue = (v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '' && v !== false);
+
+/** Form from field definitions. Fields marked `adv` are tucked under "More details" (opened when one has a value). */
 export function renderForm(fields, item, p) {
-  return `<form class="form" novalidate>${fields
-    .map((f) => `<label class="field ${f.full || ['textarea', 'list', 'multi', 'rows'].includes(f.type) ? 'full' : ''}"><span>${esc(f.label)}${f.req ? ' *' : ''}</span>${control(f, item[f.key], p)}${f.help ? `<small>${esc(f.help)}</small>` : ''}</label>`)
-    .join('')}</form>`;
+  const one = (f) => `<label class="field ${f.full || ['textarea', 'list', 'multi', 'rows'].includes(f.type) ? 'full' : ''}"><span>${esc(f.label)}${f.req ? ' *' : ''}</span>${control(f, item[f.key], p)}${f.help ? `<small>${esc(f.help)}</small>` : ''}</label>`;
+  const main = fields.filter((f) => !f.adv), more = fields.filter((f) => f.adv);
+  const open = more.some((f) => hasValue(item[f.key]));
+  return `<form class="form" novalidate>${main.map(one).join('')}${more.length ? `<details class="more full" ${open ? 'open' : ''}><summary>More details <span class="muted small">(optional — ${more.length} field${more.length === 1 ? '' : 's'})</span></summary><div class="form">${more.map(one).join('')}</div></details>` : ''}</form>`;
 }
 
 function rowsHtml(f, rows, p) {

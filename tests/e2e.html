@@ -235,6 +235,80 @@
     await go('#/masterclass', 200); $('[data-dl]', view()).click(); await sleep(200);
     check('masterclass download', downloads.some((x) => /Masterclass/.test(x.name)));
     check('final steps raise no errors', !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+
+    // ---- 5. daily-use features ----
+    log('5. Simple mode, fast capture, core documents…');
+    n = w.__babErrors.length;
+    const navCount = () => $$('a.nav').length;
+    const simpleCount = navCount();
+    $('[data-mode]').click(); await sleep(300);
+    const fullCount = navCount();
+    check('Show all tools reveals more screens', fullCount > simpleCount + 15, `${simpleCount} → ${fullCount}`);
+    $('[data-mode]').click(); await sleep(300);
+    check('Simple mode hides them again', navCount() === simpleCount);
+    // spec style hides the unused specification register
+    await go('#/charter', 250); const ss = $('[data-k="specStyle"]', view()); ss.value = 'User stories'; ss.dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(300);
+    check('choosing "User stories" hides Requirements in Simple mode', !$('a.nav[data-r="c/requirements"]') && !!$('a.nav[data-r="c/stories"]'));
+    ss.value = 'Both'; ss.dispatchEvent(new w.Event('change', { bubbles: true })); await sleep(300);
+    check('project brief shows the objectives', /Measurable objectives/.test(view().innerText));
+    // More details
+    await go('#/c/requirements', 200); $('[data-add]', view()).click(); await until(() => $('.backdrop form'));
+    check('optional fields sit under "More details"', !!$('.backdrop details.more') && !$('.backdrop details.more').open);
+    $('.backdrop [data-cancel]').click(); await sleep(150);
+    // paste a list
+    const q0 = proj().questions.length;
+    await go('#/c/questions', 200); $('[data-cap="paste"]', view()).click(); await until(() => $('.backdrop [data-text]'));
+    const pt = $('.backdrop [data-text]'); pt.value = '- who signs off the SRS\n- is SMS needed\n- who signs off the SRS'; pt.dispatchEvent(new w.Event('input')); await sleep(120);
+    check('paste preview counts unique lines', /Add 2/.test($('.backdrop [data-go]').textContent), $('.backdrop [data-go]').textContent);
+    $('.backdrop [data-go]').click(); await sleep(300);
+    check('paste adds the items', proj().questions.length === q0 + 2 && proj().questions.at(-1).question === 'Is SMS needed?');
+    // starter blocks
+    const req0 = proj().requirements.length;
+    await go('#/c/requirements', 200); $('[data-cap="starters"]', view()).click(); await until(() => $('.backdrop [data-all]'));
+    const allBox = $('.backdrop [data-all="auth"]'); allBox.checked = true; allBox.dispatchEvent(new w.Event('change')); $('.backdrop [data-go]').click(); await sleep(300);
+    check('starter block adds requirements with acceptance criteria', proj().requirements.length === req0 + 3 && proj().requirements.slice(-3).every((r) => r.acceptance.length === 2));
+    // inline editing
+    await go('#/c/requirements', 200);
+    const inl = $('select[data-inline="status"]', view()); const rid = inl.closest('tr').dataset.id; inl.value = 'Approved'; inl.dispatchEvent(new w.Event('change')); await sleep(250);
+    check('status changes straight from the table', proj().requirements.find((r) => r.id === rid).status === 'Approved' && !$('.backdrop'));
+    // derive a screen, endpoints and tests
+    const sc0 = proj().screens.length;
+    await go('#/c/screens', 200); $('[data-cap="screen"]', view()).click(); await until(() => $('.backdrop [data-e]')); $('.backdrop [data-go]').click(); await sleep(400);
+    check('screen created from an entity', proj().screens.length === sc0 + 1 && proj().screens.at(-1).fields.length > 2);
+    if ($('.backdrop')) { $('.backdrop [data-cancel]')?.click(); await sleep(120); }
+    const a0 = proj().apis.length;
+    await go('#/c/apis', 200); $('[data-cap="apis"]', view()).click(); await until(() => $('.backdrop [data-e]')); $('.backdrop [data-go]').click(); await sleep(300);
+    check('endpoints created from an entity', proj().apis.length >= a0 + 4);
+    const t0 = proj().tests.length;
+    await go('#/c/tests', 200); $('[data-cap="tests"]', view()).click(); await sleep(300);
+    check('UAT tests created from acceptance criteria', proj().tests.length > t0);
+    const t1 = proj().tests.length; $('[data-cap="tests"]', view()).click(); await sleep(250);
+    check('creating tests again adds no duplicates', proj().tests.length === t1);
+    // Ctrl+K
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); await until(() => $('.backdrop [data-jq]'));
+    const jq = $('.backdrop [data-jq]'); jq.value = 'sql work'; jq.dispatchEvent(new w.Event('input')); await sleep(100);
+    jq.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await sleep(400);
+    check('Ctrl+K jumps to a screen', w.location.hash === '#/sql');
+    d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true })); await until(() => $('.backdrop [data-jq]'));
+    const jq2 = $('.backdrop [data-jq]'); jq2.value = 'FR-001'; jq2.dispatchEvent(new w.Event('input')); await sleep(100);
+    jq2.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await sleep(500);
+    check('Ctrl+K opens an item', /FR-001/.test($('.backdrop h2, .backdrop .modal-head')?.innerText || ''));
+    if ($('.backdrop')) { $('.backdrop [data-cancel]')?.click(); await sleep(120); }
+    // project template
+    const promptOrig = w.prompt; w.prompt = () => 'E2E template';
+    await go('#/settings', 300); $('[data-savetpl]', view()).click(); await sleep(300); w.prompt = promptOrig;
+    check('project saved as a template', JSON.parse(w.localStorage.getItem('bab.settings')).templates?.some((t) => t.name === 'E2E template'));
+    await go('#/settings', 300); $('[data-pname]', view()).value = 'From template'; $('[data-ptpl]', view()).value = 'E2E template'; $('[data-new]', view()).click(); await sleep(400);
+    check('new project starts from the template', proj().meta.name === 'From template' && proj().personas.length > 0 && proj().requirements.every((r) => r.type === 'Non-functional'));
+    // core documents and the builder
+    for (const id of ['core-brief', 'core-functional', 'core-data', 'core-uat', 'core-raid']) { await go(`#/docs/${id}`, 300); check(`${id} renders`, /Document control/.test(view().innerText) && !BAD_TEXT.test(view().innerText)); }
+    await go('#/docs/compose', 300);
+    const sec = $('[data-sec="glossary"]', view()); sec.checked = !sec.checked; sec.dispatchEvent(new w.Event('change')); await sleep(300);
+    check('document builder updates the sections', (JSON.parse(w.localStorage.getItem('bab.settings')).compose?.sections || []).includes('glossary') === sec.checked);
+    downloads.length = 0; $('[data-word]', view()).click();
+    check('document builder exports to Word', await until(() => downloads.some((x) => /\.doc$/.test(x.name)), 30000));
+    check('daily-use features raise no errors', !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+    check('no errors in the whole run (including daily-use features)', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
     check('no errors in the whole run', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
   } catch (e) {
     check('test run completed', false, e.stack || e.message);

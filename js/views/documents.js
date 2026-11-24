@@ -1,7 +1,7 @@
 // Documents: preview any generated deliverable and export to Word, PDF (print), HTML or Markdown.
-import { project, getSettings } from '../store.js';
+import { project, getSettings, saveSettings } from '../store.js';
 import { esc, $, $$, toast, download, fileSafe } from '../ui.js';
-import { DOC_LIST, buildDoc } from '../gen/docs.js';
+import { DOC_LIST, buildDoc, SECTION_LIST, CORE_DOCS, buildComposed } from '../gen/docs.js';
 import { mdToHtml } from '../markdown.js';
 import { render, sized, svgToPng } from '../mermaid.js';
 
@@ -40,8 +40,9 @@ async function drawDiagrams(el, mode = 'svg') {
   }
 }
 
+/** Word / HTML file for a document id, or for an already-built document ({ title, markdown }). */
 export async function docHtml(p, id, mode = 'png') {
-  const doc = buildDoc(p, id);
+  const doc = typeof id === 'object' ? id : buildDoc(p, id);
   const div = document.createElement('div');
   div.innerHTML = mdToHtml(doc.markdown);
   div.querySelectorAll('.mmd').forEach((m) => (m.dataset.light = '1'));
@@ -68,21 +69,39 @@ export async function docHtml(p, id, mode = 'png') {
   return `<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(doc.title)}</title><style>${PAPER_CSS}</style></head><body>${body}<p class="footer">${esc(org ? `${org} · ` : '')}${esc(p.meta.name)} · ${esc(doc.title)} · v${esc(p.meta.version)} · Generated with BA Builder</p></body></html>`;
 }
 
+const DEFAULT_COMPOSE = { title: 'Requirements Sign-off Pack', sections: ['control', 'problem', 'objectives', 'stories', 'functional', 'nfr', 'rules', 'signoff'] };
+
 export function renderDocuments(root, id) {
   const p = project();
-  const cur = DOC_LIST.find((d) => d.id === id) || DOC_LIST[0];
-  const doc = buildDoc(p, cur.id);
+  const composing = id === 'compose';
+  const comp = { ...DEFAULT_COMPOSE, ...(getSettings().compose || {}) };
+  const cur = composing ? { id: 'compose', title: comp.title } : DOC_LIST.find((d) => d.id === id) || DOC_LIST.find((d) => d.core) || DOC_LIST[0];
+  const doc = composing ? buildComposed(p, comp.title || 'Document', comp.sections) : buildDoc(p, cur.id);
+  const others = DOC_LIST.filter((d) => !d.core);
+  const showAll = getSettings().mode === 'full' || others.some((d) => d.id === cur.id);
+  const link = (d) => `<a href="#/docs/${d.id}" class="${d.id === cur.id ? 'on' : ''}">${esc(d.title)}<small>${esc(d.audience)}</small></a>`;
+  const groups = [...new Set(SECTION_LIST.map((x) => x.group))];
   root.innerHTML = `
-    <div class="page-head no-print"><div><h1>Documents</h1><p>Every deliverable is written from your analysis and updates when the data changes. Export to Word, PDF, HTML or Markdown.</p></div></div>
+    <div class="page-head no-print"><div><h1>Documents</h1><p>Written from your analysis and always up to date. Use the five core deliverables, or build your own from any sections. Export to Word, PDF, HTML or Markdown, or copy as rich text into Word, Confluence or email.</p></div></div>
     <div class="docs">
-      <nav class="card doc-list no-print" aria-label="Documents">${DOC_LIST.map((d) => `<a href="#/docs/${d.id}" class="${d.id === cur.id ? 'on' : ''}">${esc(d.title)}<small>${esc(d.audience)}</small></a>`).join('')}</nav>
-      <div>
-        <div class="card no-print" style="margin-bottom:12px"><div class="row">
+      <nav class="card doc-list no-print" aria-label="Documents">
+        <div class="nav-label">Core deliverables</div>${CORE_DOCS.map((c) => link(DOC_LIST.find((d) => d.id === c.id))).join('')}
+        <div class="nav-label">Custom</div><a href="#/docs/compose" class="${composing ? 'on' : ''}">Build a document<small>Pick the sections you need</small></a>
+        <details ${showAll ? 'open' : ''}><summary class="nav-label" style="cursor:pointer">More documents (${others.length})</summary>${others.map(link).join('')}</details>
+      </nav>
+      <div style="min-width:0">
+        ${composing ? `<div class="card no-print" style="margin-bottom:12px">
+          <div class="row" style="gap:8px;flex-wrap:wrap"><label class="field" style="flex:1;min-width:220px;margin:0"><span>Document title</span><input type="text" data-ct value="${esc(comp.title)}"></label>
+            <button class="btn sm" data-cpreset="core-functional">Start from a core deliverable…</button></div>
+          <div class="grid g3" style="margin-top:10px">${groups.map((g) => `<div><b class="small" style="color:var(--green-2)">${esc(g)}</b>${SECTION_LIST.filter((x) => x.group === g).map((x) => `<label class="small" style="display:block;margin:3px 0"><input type="checkbox" data-sec="${x.id}" ${comp.sections.includes(x.id) ? 'checked' : ''}> ${esc(x.title)}</label>`).join('')}</div>`).join('')}</div>
+          <p class="small muted" style="margin:8px 0 0">Sections with nothing in them yet are left out automatically. Your choice is remembered.</p>
+        </div>` : ''}
+        <div class="card no-print" style="margin-bottom:12px"><div class="row" style="flex-wrap:wrap">
           <button class="btn primary sm" data-word>Word (.doc)</button>
           <button class="btn sm" data-print>PDF / print</button>
+          <button class="btn sm" data-rich title="Paste into Word, Confluence, Google Docs or Outlook with headings and tables">Copy rich text</button>
           <button class="btn sm" data-html>HTML</button>
           <button class="btn sm" data-md>Markdown</button>
-          <button class="btn sm" data-copy>Copy text</button>
           <span class="grow"></span><span class="muted small">${doc.markdown.split(/\s+/).length.toLocaleString()} words</span>
         </div></div>
         <article class="paper" data-paper>${mdToHtml(doc.markdown)}</article>
@@ -90,18 +109,40 @@ export function renderDocuments(root, id) {
     </div>`;
   const paper = $('[data-paper]', root);
   drawDiagrams(paper, 'svg');
-  const base = `${fileSafe(p.meta.code || p.meta.name)}_${fileSafe(cur.title)}`;
+  const base = `${fileSafe(p.meta.code || p.meta.name)}_${fileSafe(doc.title)}`;
   $('[data-md]', root).onclick = () => download(doc.markdown, `${base}.md`, 'text/markdown');
   $('[data-print]', root).onclick = () => window.print();
-  $('[data-copy]', root).onclick = async () => {
-    try { await navigator.clipboard.writeText(doc.markdown); toast('Copied as Markdown'); } catch { toast('Copy blocked by the browser', 'err'); }
-  };
   const busy = async (btn, fn) => {
     const t = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Preparing…';
     try { await fn(); } catch (e) { toast(e.message, 'err'); } finally { btn.disabled = false; btn.textContent = t; }
   };
-  $('[data-word]', root).onclick = (e) => busy(e.target, async () => download(await docHtml(p, cur.id, 'png'), `${base}.doc`, 'application/msword'));
-  $('[data-html]', root).onclick = (e) => busy(e.target, async () => download(await docHtml(p, cur.id, 'svg'), `${base}.html`, 'text/html'));
+  $('[data-word]', root).onclick = (e) => busy(e.target, async () => download(await docHtml(p, doc, 'png'), `${base}.doc`, 'application/msword'));
+  $('[data-html]', root).onclick = (e) => busy(e.target, async () => download(await docHtml(p, doc, 'svg'), `${base}.html`, 'text/html'));
+  // rich text: headings, tables and diagrams (as images) paste cleanly into Word, Confluence, Google Docs, Outlook
+  $('[data-rich]', root).onclick = (e) => busy(e.target, async () => {
+    const html = await docHtml(p, doc, 'png');
+    const body = html.replace(/^[\s\S]*?<body>/i, '').replace(/<\/body>[\s\S]*$/i, '');
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([body], { type: 'text/html' }), 'text/plain': new Blob([doc.markdown], { type: 'text/plain' }) })]);
+      toast('Copied — paste into Word, Confluence, Google Docs or Outlook');
+    } catch {
+      await navigator.clipboard.writeText(doc.markdown).then(() => toast('Your browser only allowed plain text — copied as Markdown')).catch(() => toast('Copy was blocked by the browser', 'err'));
+    }
+  });
+  if (composing) {
+    const save = (patch) => saveSettings({ compose: { ...comp, ...patch } });
+    const ct = $('[data-ct]', root);
+    ct.onchange = () => save({ title: ct.value.trim() || 'Document' });
+    root.querySelectorAll('[data-sec]').forEach((c) => (c.onchange = () => {
+      const picked = SECTION_LIST.map((x) => x.id).filter((sid) => root.querySelector(`[data-sec="${sid}"]`).checked);
+      save({ sections: picked });
+    }));
+    $('[data-cpreset]', root).onclick = () => {
+      const pick = prompt(`Start from which deliverable?\n${CORE_DOCS.map((c, i) => `${i + 1}. ${c.title}`).join('\n')}`, '2');
+      const c = CORE_DOCS[(+pick || 0) - 1];
+      if (c) save({ title: c.title, sections: [...c.sections] });
+    };
+  }
 }

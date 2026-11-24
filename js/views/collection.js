@@ -4,6 +4,20 @@ import { project, update } from '../store.js';
 import { esc, $, $$, modal, toast, confirmBox, renderForm, wireForm, readForm, download, fileSafe } from '../ui.js';
 import { toCsv } from '../gen/exports.js';
 import { FOCUS_TYPES } from '../gen/diagrams.js';
+import { captureButtons, wireCapture } from './capture.js';
+
+// Columns that can be changed straight from the table (header → field key).
+const INLINE = {
+  requirements: { Priority: 'priority', Status: 'status' },
+  stories: { Priority: 'priority', Status: 'status' },
+  tests: { Status: 'status' },
+  raid: { Status: 'status' },
+  questions: { Status: 'status' },
+  defects: { Status: 'status' },
+  changes: { Status: 'status' },
+  objectives: {},
+};
+const optionsOf = (c, key, p) => { const f = c.fields.find((x) => x.key === key); const o = typeof f?.options === 'function' ? f.options(p) : f?.options || []; return o.map((x) => (typeof x === 'object' ? x : { value: x, label: x })); };
 
 const filterState = {};
 
@@ -30,11 +44,12 @@ export function renderCollection(root, key, opts = {}) {
         ${Object.entries(filters).map(([f, vals]) => `<select data-f="${f}" style="max-width:160px" aria-label="Filter by ${f}"><option value="">All ${f}</option>${vals.map((v) => `<option ${st[f] === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select>`).join('')}
         <span class="grow"></span>
         <span class="muted small">${items.length} of ${all.length}</span>
+        ${captureButtons(key)}
         <button class="btn sm" data-csv>Export CSV</button>
         <button class="btn sm primary" data-add>+ ${esc(addLabel || `Add ${c.singular}`)}</button>
       </div>
       ${items.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr>${c.cols.map(([h, , cls]) => `<th class="${cls || ''}">${esc(h)}</th>`).join('')}</tr></thead>
-        <tbody>${items.map((it) => `<tr class="click" data-id="${esc(it.id)}" tabindex="0">${c.cols.map(([, fn, cls]) => `<td class="${cls || ''}">${fn(it, p)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+        <tbody>${items.map((it) => `<tr class="click" data-id="${esc(it.id)}" tabindex="0">${c.cols.map(([h, fn, cls]) => { const k = INLINE[key]?.[h]; return `<td class="${cls || ''}">${k ? `<select class="inline" data-inline="${k}" aria-label="${esc(h)} of ${esc(it.code || it.title || '')}">${optionsOf(c, k, p).map((o) => `<option value="${esc(o.value)}" ${String(it[k] ?? '') === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>` : fn(it, p)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`
         : `<div class="empty">${all.length ? 'Nothing matches the filter.' : `Nothing here yet — click “${esc(addLabel || `Add ${c.singular}`)}”.`}</div>`}
     </section>`;
 
@@ -50,6 +65,17 @@ export function renderCollection(root, key, opts = {}) {
   $$('[data-f]', root).forEach((s) => (s.onchange = () => ((st[s.dataset.f] = s.value), renderCollection(root, key, opts))));
   $('[data-add]', root).onclick = () => openItem(key, null, preset);
   $('[data-csv]', root).onclick = () => download(toCsv(key, p), `${fileSafe(c.title)}.csv`, 'text/csv');
+  wireCapture(root, key);
+  // inline edits: change the value without opening the editor
+  $$('select[data-inline]', root).forEach((sel) => {
+    sel.onclick = (e) => e.stopPropagation();
+    sel.onkeydown = (e) => e.stopPropagation();
+    sel.onchange = () => {
+      const id = sel.closest('tr').dataset.id;
+      update((pr) => { const it = pr[key].find((x) => x.id === id); if (it) it[sel.dataset.inline] = sel.value; });
+      toast(`${sel.getAttribute('aria-label').split(' of ')[0]} updated`);
+    };
+  });
   $$('tr[data-id]', root).forEach((tr) => {
     tr.onclick = () => openItem(key, tr.dataset.id);
     tr.onkeydown = (e) => e.key === 'Enter' && openItem(key, tr.dataset.id);

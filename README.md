@@ -4,6 +4,26 @@ A complete workspace for **Technical Business Analysts** — from strategy and e
 through requirements and solution modelling, to diagrams, documentation and technical
 specifications. Plain HTML, CSS and JavaScript: no build step, no server, no account.
 
+## Built for daily work
+- **Simple mode** (the default) shows only the screens a software BA uses every day — brief,
+  stakeholders, elicitation, stories or requirements, rules, UAT, traceability, processes, data,
+  screens & mapping, APIs, SQL, RAID, decisions, changes, diagrams and documents. **Show all tools**
+  (bottom of the sidebar) reveals strategy, estimating, architecture, learning and the rest.
+- Choose **user stories or requirements** in the Project brief; Simple mode then shows only that one.
+- **Shorter forms:** optional fields sit under "More details".
+- **Paste a list** on most registers: paste bullet points from meeting notes or chat and each line
+  becomes an open question, requirement, story, glossary term ("Term: definition"), RAID item
+  ("Risk: …"), rule, stakeholder ("Name - Role"), user type, test case, change or decision.
+- **Starter blocks:** ready-made requirements or stories with acceptance criteria (sign-in & roles,
+  audit trail, notifications, search/filter/export, file upload), common user roles, and common RAID
+  items — all written to pass the quality checks.
+- **Type once, reuse:** create a screen from an entity (every attribute mapped), standard REST
+  endpoints from an entity, and draft UAT tests from acceptance criteria.
+- **Project templates:** save a project's reusable parts (roles, stakeholders, glossary, NFRs,
+  assumptions, BA plan) and start new projects from them.
+- **Edit status and priority straight in the tables**, and press **Ctrl + K** to jump to any screen,
+  document or item by name or ID.
+
 ## Write an SRS step by step
 
 Click **+ New SRS** (top of the sidebar) and follow 10 guided steps:
@@ -86,7 +106,20 @@ Plus:
 - **Whiteboard** — drag-and-drop flowcharts and low-fidelity wireframes with connectors,
   pan/zoom, and SVG/PNG/JSON export.
 
-### Documents (22)
+### Documents
+**Five core deliverables:** Discovery & Scope Brief · Functional & Backlog Specification · Data &
+Integration Specification · UAT & Traceability Pack · RAID & Change Log. Each starts with document
+control, numbers its sections, and leaves out anything that is still empty.
+
+**Build a document:** tick any of 30 sections (problem & scope, objectives, stakeholders, stories,
+requirements, NFRs, rules, processes, screens, data model, dictionary, mapping, APIs, integrations,
+permissions, tests, RTM, defects, RAID, decisions, changes, glossary, approval…) and export one
+combined document — e.g. a sign-off pack.
+
+**Copy rich text** pastes headings, tables and diagrams cleanly into Word, Confluence, Google Docs
+or Outlook.
+
+**More documents (22)**
 Project Charter · Business Case · Strategy Analysis · Stakeholder Analysis & Engagement Plan ·
 Elicitation Report & Minutes · BRD · SRS (ISO/IEC/IEEE 29148 structure) · Use Case
 Specifications · Product Backlog · Process Documentation · Data Dictionary · API & Interface
@@ -188,9 +221,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-261 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+299 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-splitting big diagrams (nothing lost, no part too big), normalising to 3NF, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), normalising to 3NF, Simple mode, paste-to-add, starter blocks, derived screens / endpoints / tests, templates, core documents and the document builder, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs

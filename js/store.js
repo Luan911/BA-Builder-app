@@ -1,6 +1,7 @@
 // State: several projects kept in browser storage, autosave and undo.
 import { normalize, blankProject } from './model.js';
 import { sampleProject } from './sample.js';
+import { applyTemplate } from './gen/capture.js';
 
 const KEY = 'bab.workspace';
 const SKEY = 'bab.settings';
@@ -81,7 +82,10 @@ export function addProject(p) {
   emit({ rerender: true });
   return p;
 }
-export const newProject = (name) => addProject(blankProject(name));
+export const newProject = (name, template = null) => addProject(template ? applyTemplate(blankProject(name), template) : blankProject(name));
+export const templates = () => (Array.isArray(settings.templates) ? settings.templates : []);
+export function saveTemplate(tpl) { saveSettings({ templates: [...templates().filter((t) => t.name !== tpl.name), tpl] }); }
+export function deleteTemplate(name) { saveSettings({ templates: templates().filter((t) => t.name !== name) }); }
 export const loadSample = () => {
   const s = sampleProject();
   s.id = `prj_sample_${Date.now().toString(36)}`;

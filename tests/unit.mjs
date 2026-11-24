@@ -484,5 +484,69 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('reviews and lessons learned are in the sidebar', ['c/reviews', 'c/lessons'].every((r) => items.some((x) => x[0] === r)));
 }
 
+// ---------- daily-use streamlining: Simple mode, fast capture, core documents ----------
+{
+  const M = await import('../js/model.js');
+  const C = await import('../js/gen/capture.js');
+  const T = await import('../js/templates.js');
+  const D = await import('../js/gen/docs.js');
+  const { searchTargets } = await import('../js/views/jump.js').catch(() => ({}));
+  const { readFileSync } = await import('node:fs');
+  const appSrc = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
+  const NAV = eval(appSrc.match(/const NAV = (\[[\s\S]*?\n\]);/)[1]);
+  const SIMPLE = eval(`new Set(${appSrc.match(/export const SIMPLE = new Set\((\[[\s\S]*?\])\);/)[1]})`);
+  const allRoutes = NAV.flatMap(([, i]) => i.map((x) => x[0]));
+  t('Simple mode lists only real sidebar routes', [...SIMPLE].every((r) => allRoutes.includes(r)), [...SIMPLE].filter((r) => !allRoutes.includes(r)).join(', '));
+  t('Simple mode keeps the daily screens and hides the rest', SIMPLE.size >= 20 && SIMPLE.size <= 30 && ['c/requirements', 'c/stories', 'c/screens', 'c/apis', 'sql', 'docs', 'trace', 'c/raid'].every((r) => SIMPLE.has(r)) && !['bmc', 'estimate', 'vendors', 'masterclass', 'normalise'].some((r) => SIMPLE.has(r)));
+  // shorter forms
+  t('no required field is tucked under "More details"', Object.values(M.COLLECTIONS).every((c) => c.fields.every((f) => !(f.adv && f.req))));
+  t('at least 60 optional fields are tucked away', Object.values(M.COLLECTIONS).reduce((a, c) => a + c.fields.filter((f) => f.adv).length, 0) >= 60);
+  // paste a list
+  eq('bullets, numbers, checkboxes and duplicates are stripped', C.parseLines('- One\n* 2. Two\n3) Three\n[ ] Four\n- [x] Five\n\n- One'), ['One', 'Two', 'Three', 'Four', 'Five']);
+  const s = sampleProject();
+  const reqs = C.itemsFromText('requirements', '- let customers reset their password\n- The system shall log every sign-in.', s);
+  eq('pasted requirements become "shall" statements with codes', reqs.map((r) => [r.code, r.statement]), [['FR-004', 'The system shall let customers reset their password.'], ['FR-005', 'The system shall log every sign-in.']]);
+  t('pasted requirements are traced to the approver', reqs.every((r) => r.source === 's1'));
+  const st = C.itemsFromText('stories', 'As a Credit Officer, I want to filter the queue so that I see urgent cases first', s)[0];
+  eq('story text is split into role / goal / benefit', [st.asA, st.iWant, st.soThat], ['p2', 'filter the queue', 'I see urgent cases first']);
+  eq('glossary "Term: definition"', C.itemsFromText('glossary', 'KYC: know your customer', s).map((g) => [g.term, g.definition]), [['KYC', 'Know your customer.']]);
+  eq('RAID type from the prefix, else the default', C.itemsFromText('raid', 'Risk: vendor late\nusers have email', s, 'Assumption').map((r) => r.type), ['Risk', 'Assumption']);
+  eq('stakeholder "Name - Role"', C.itemsFromText('stakeholders', 'Jane Smith - Head of Credit', s).map((x) => [x.name, x.role]), [['Jane Smith', 'Head of Credit']]);
+  eq('questions get a question mark and a capital', C.itemsFromText('questions', '- who approves refunds', s)[0].question, 'Who approves refunds?');
+  t('every pasted item passes its register\'s required fields', Object.keys(C.QUICK).every((k) => C.itemsFromText(k, '- Something useful: detail here\n- Another thing', s, C.QUICK[k].options?.[0]).every((x) => M.COLLECTIONS[k].fields.filter((f) => f.req && f.key !== 'code').every((f) => (Array.isArray(x[f.key]) ? x[f.key].length : String(x[f.key] ?? '').trim())))));
+  // starter blocks
+  t('starter requirements pass the quality checks with no suggestions', T.STARTERS.requirements.every((b) => b.items.every(([, st2, , acs]) => !M.lintRequirement({ type: 'Functional', statement: st2, acceptance: acs, source: 's1', objectiveIds: ['o1'] }, s).length && !M.suggestRequirement({ type: 'Functional', statement: st2, acceptance: acs }).length)));
+  // derive from the model
+  const scr = C.screenFromEntity(s, s.entities.find((e) => e.name === 'Application'));
+  t('screen from an entity maps every attribute and adds a Save button', scr.fields.filter((f) => f.control !== 'Button').every((f) => /^Application\./.test(f.mapsTo)) && scr.fields.at(-1).control === 'Button' && scr.fields.some((f) => f.control === 'Currency'));
+  eq('the derived screen has no mapping issues', M.mappingIssues(scr, s), []);
+  const eps = C.endpointsFromEntity(s, s.entities.find((e) => e.name === 'Customer'));
+  eq('CRUD endpoints for an entity', eps.map((a) => `${a.method} ${a.path}`), ['GET /customers', 'GET /customers/{id}', 'POST /customers', 'PUT /customers/{id}', 'DELETE /customers/{id}']);
+  t('generated endpoints pass the API checks except the requirement link', eps.every((a) => M.lintApi({ ...a, requirementIds: ['r3'] }, s).length === 0), eps.map((a) => M.lintApi({ ...a, requirementIds: ['r3'] }, s).join(';')).join(' | '));
+  eq('existing endpoints are not duplicated', C.endpointsFromEntity(s, s.entities.find((e) => e.name === 'Application')).map((a) => `${a.method} ${a.path}`).includes('POST /applications'), false);
+  const tests = C.testsFromAcceptance(s);
+  t('a draft test per acceptance scenario, linked to its requirement or story', tests.length > 0 && tests.every((x) => x.requirementIds.length || x.storyIds.length) && tests.every((x) => x.expected));
+  eq('running it again adds nothing', C.testsFromAcceptance({ ...s, tests: [...s.tests, ...tests] }).length, 0);
+  // templates
+  const tpl = C.templateFrom(s, 'Lending starter');
+  t('a template keeps NFRs, roles and assumptions but not project-specific work', tpl.data.requirements.every((r) => r.type === 'Non-functional') && tpl.data.personas.length === s.personas.length && !('stories' in tpl.data) && tpl.data.raid.every((r) => ['Assumption', 'Dependency'].includes(r.type)));
+  const np = C.applyTemplate(M.blankProject('New'), tpl);
+  t('a new project from a template starts with them', np.meta.name === 'New' && np.personas.length && np.requirements.length && !np.stories.length);
+  // quick jump
+  if (searchTargets) {
+    const list = [{ kind: 'Screen', label: 'SQL workbench', detail: 'Solution design' }, { kind: 'requirement', label: 'FR-001 Submit a loan application', detail: 'Requirements' }, { kind: 'Screen', label: 'Requirements', detail: 'Requirements' }];
+    eq('quick jump finds an ID first', searchTargets(list, 'fr-001')[0].label, 'FR-001 Submit a loan application');
+    eq('quick jump matches all words', searchTargets(list, 'sql work').map((x) => x.label), ['SQL workbench']);
+  }
+  // core documents and the builder
+  eq('5 core deliverables', D.CORE_DOCS.length, 5);
+  t('every core deliverable uses real sections', D.CORE_DOCS.every((c) => c.sections.every((id) => D.SECTION_LIST.some((x) => x.id === id))));
+  for (const c of D.CORE_DOCS) { const m = D.buildDoc(s, c.id).markdown; t(`${c.title}: builds cleanly with numbered sections`, m.length > 1000 && /## 1\. Document control/.test(m) && !/undefined|NaN|\[object Object\]/.test(m)); }
+  const comp = D.buildComposed(s, 'My pack', ['objectives', 'defects', 'signoff']);
+  t('the builder numbers sections in order and keeps the approval block', /## 1\. Business objectives/.test(comp.markdown) && /## 2\. Defects/.test(comp.markdown) && /## Approval/.test(comp.markdown));
+  t('empty sections are left out', !/Use cases/.test(D.buildComposed(M.blankProject('x'), 'X', ['usecases', 'signoff']).markdown));
+  t('every section builds on an empty project without errors', D.SECTION_LIST.every((x) => !/undefined|NaN/.test(D.buildComposed(M.blankProject('x'), 'X', [x.id]).markdown)));
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

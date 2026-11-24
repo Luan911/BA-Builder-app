@@ -1,5 +1,6 @@
 // Projects, import / export, technical exports and preferences.
-import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings } from '../store.js';
+import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings, templates, saveTemplate, deleteTemplate } from '../store.js';
+import { templateFrom } from '../gen/capture.js';
 import { esc, $, $$, toast, download, pickFile, fileSafe, confirmBox } from '../ui.js';
 import { COLLECTIONS, uid, ensureCode, normalize } from '../model.js';
 import { openApi, sqlDdl, jsonSchemas, rtmCsv, toCsv, postmanCollection } from '../gen/exports.js';
@@ -90,7 +91,7 @@ export function renderSettings(root) {
   const code = fileSafe(p.meta.code || p.meta.name);
   root.innerHTML = `
     <div class="page-head"><div><h1>Projects & export</h1><p>Everything is stored in this browser. Export a project file to back it up or share it with another analyst.</p></div></div>
-    <section class="card flush"><div class="card-head"><h2>Projects</h2><span class="grow"></span><input type="text" placeholder="New project name" data-pname style="max-width:240px"><button class="btn sm primary" data-new>+ New project</button><button class="btn sm" data-sample>Add example project</button><button class="btn sm" data-import>Import project file</button></div>
+    <section class="card flush"><div class="card-head"><h2>Projects</h2><span class="grow"></span><input type="text" placeholder="New project name" data-pname style="max-width:240px">${templates().length ? `<select data-ptpl style="max-width:200px" aria-label="Template"><option value="">Blank</option>${templates().map((t) => `<option>${esc(t.name)}</option>`).join('')}</select>` : ''}<button class="btn sm primary" data-new>+ New project</button><button class="btn sm" data-sample>Add example project</button><button class="btn sm" data-import>Import project file</button></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Project</th><th>Code</th><th>Updated</th><th>Requirements</th><th></th></tr></thead><tbody>
       ${projects().map((x) => `<tr><td><b>${esc(x.meta.name || 'Untitled')}</b>${x.id === p.id ? ' <span class="pill ok">Open</span>' : ''}</td><td>${esc(x.meta.code)}</td><td class="small">${esc(String(x.updatedAt).slice(0, 16).replace('T', ' '))}</td><td>${x.requirements.length}</td>
         <td style="white-space:nowrap">${x.id !== p.id ? `<button class="btn sm" data-open="${x.id}">Open</button>` : ''}<button class="btn sm" data-dupp="${x.id}">Duplicate</button><button class="btn sm danger" data-delp="${x.id}">Delete</button></td></tr>`).join('')}
@@ -114,13 +115,26 @@ export function renderSettings(root) {
       <div class="row"><select data-ckey style="max-width:240px">${IMPORTABLE.map((k) => `<option value="${k}">${esc(COLLECTIONS[k].title)}</option>`).join('')}</select><button class="btn" data-csvin>Choose CSV file…</button><button class="btn ghost" data-tpl>Download template</button></div>
     </section>
 
+    <section class="card flush"><div class="card-head"><h2>Project templates</h2><span class="grow"></span><button class="btn sm primary" data-savetpl>Save "${esc(p.meta.name || 'this project')}" as a template</button></div>
+      <p class="muted small" style="padding:0 16px">A template keeps the reusable parts of a project — user roles, stakeholders, glossary, quality requirements (NFRs), general business rules, assumptions and dependencies, day rates and the BA plan — so a new project starts well ahead.</p>
+      ${templates().length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Template</th><th>Contains</th><th>Saved</th><th></th></tr></thead><tbody>${templates().map((t) => `<tr><td><b>${esc(t.name)}</b></td><td class="small">${['personas', 'stakeholders', 'glossary', 'requirements', 'rules', 'raid'].map((k) => `${(t.data?.[k] || []).length} ${k === 'requirements' ? 'NFRs' : k}`).join(' · ')}</td><td class="small">${esc(String(t.createdAt || '').slice(0, 10))}</td><td><button class="btn sm danger" data-deltpl="${esc(t.name)}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted" style="padding:0 16px 12px">No templates yet.</p>'}
+    </section>
+
     <section class="card"><h2>Preferences</h2>
       <div class="form" style="margin-top:10px">
         <label class="field"><span>Organisation (document footer)</span><input type="text" data-org value="${esc(s.org)}"></label>
       </div>
     </section>`;
 
-  $('[data-new]', root).onclick = () => { newProject($('[data-pname]', root).value.trim() || 'New project'); location.hash = '#/charter'; };
+  $('[data-new]', root).onclick = () => { newProject($('[data-pname]', root).value.trim() || 'New project', templates().find((t) => t.name === $('[data-ptpl]', root)?.value) || null); location.hash = '#/charter'; };
+  $('[data-savetpl]', root).onclick = () => {
+    const name = (prompt('Template name', `${p.meta.domain || p.meta.client || 'My'} starter`) || '').trim();
+    if (!name) return;
+    if (templates().some((t) => t.name === name) && !confirm(`Replace the template "${name}"?`)) return;
+    saveTemplate(templateFrom(p, name));
+    toast(`Template "${name}" saved — choose it when you start a new SRS or project`);
+  };
+  $$('[data-deltpl]', root).forEach((b) => (b.onclick = async () => { if (await confirmBox(`Delete the template "${b.dataset.deltpl}"? Projects made from it are not affected.`)) deleteTemplate(b.dataset.deltpl); }));
   $('[data-sample]', root).onclick = () => (loadSample(), toast('Example project added'));
   $('[data-import]', root).onclick = async () => {
     const f = await pickFile('.json,application/json');

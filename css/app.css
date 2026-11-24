@@ -279,3 +279,15 @@ select { max-width: 100%; }
 .bmc-partners { grid-area: partners; } .bmc-activities { grid-area: activities; } .bmc-resources { grid-area: resources; } .bmc-value { grid-area: value; } .bmc-relationships { grid-area: relationships; } .bmc-channels { grid-area: channels; } .bmc-segments { grid-area: segments; } .bmc-costs { grid-area: costs; } .bmc-revenue { grid-area: revenue; }
 @media (max-width: 1100px) { .bmc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: 'value segments' 'relationships channels' 'activities resources' 'partners partners' 'costs revenue'; } }
 @media (max-width: 640px) { .bmc { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'value' 'segments' 'relationships' 'channels' 'activities' 'resources' 'partners' 'costs' 'revenue'; } }
+
+/* "More details" section in forms */
+.form details.more { grid-column: 1 / -1; border: 1px dashed var(--border-2); border-radius: 10px; padding: 6px 12px; }
+.form details.more > summary { cursor: pointer; font-weight: 600; color: var(--green-2); padding: 4px 0; }
+.form details.more > .form { margin-top: 8px; }
+
+/* status / priority changed straight from a table */
+.tbl select.inline { width: auto; min-width: 96px; padding: 3px 6px; font-size: 12.5px; background: var(--surface-2); border-color: var(--border); }
+
+/* Ctrl+K quick jump */
+a.jump { display: flex; gap: 8px; align-items: baseline; padding: 7px 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
+a.jump.on, a.jump:hover { background: var(--accent-weak); }

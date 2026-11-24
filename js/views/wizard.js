@@ -1,7 +1,7 @@
 // SRS wizard: a guided, step-by-step path from a blank page to a finished
 // Software Requirements Specification. Each step explains what to write, shows an
 // example, checks the work, and the last step reviews and exports the SRS.
-import { project, update, newProject } from '../store.js';
+import { project, update, newProject, templates } from '../store.js';
 import { esc, $, $$, modal, toast, renderForm, readForm, download, fileSafe } from '../ui.js';
 import { lintRequirement } from '../model.js';
 import { buildDoc } from '../gen/docs.js';
@@ -223,13 +223,14 @@ export function startNewSrs() {
     title: 'Start a new SRS',
     body: `<p class="muted" style="margin-top:0">You will be guided through ${STEPS.length} short steps. Everything saves automatically, and you can leave and come back at any time.</p>
       <div class="form"><label class="field full"><span>What is the system called?</span><input type="text" data-n placeholder="e.g. Online Loan Application"></label>
-      <label class="field"><span>Short code (optional)</span><input type="text" data-c placeholder="e.g. OLA" maxlength="8"></label></div>`,
+      <label class="field"><span>Short code (optional)</span><input type="text" data-c placeholder="e.g. OLA" maxlength="8"></label>
+      ${templates().length ? `<label class="field full"><span>Start from a template</span><select data-t><option value="">Blank project</option>${templates().map((t) => `<option>${esc(t.name)}</option>`).join('')}</select><small>Templates bring your usual roles, stakeholders, glossary, quality requirements and assumptions.</small></label>` : ''}</div>`,
     footer: '<span class="grow"></span><button class="btn" data-x2>Cancel</button><button class="btn primary" data-go>Start step 1 →</button>',
   });
   const go = () => {
     const name = $('[data-n]', m.el).value.trim();
     if (!name) return toast('Give the system a name first', 'err');
-    newProject(name);
+    newProject(name, templates().find((t) => t.name === $('[data-t]', m.el)?.value) || null);
     const code = $('[data-c]', m.el).value.trim().toUpperCase();
     update((pr) => {
       pr.meta.code = code;
