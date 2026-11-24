@@ -548,5 +548,110 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('every section builds on an empty project without errors', D.SECTION_LIST.every((x) => !/undefined|NaN/.test(D.buildComposed(M.blankProject('x'), 'X', [x.id]).markdown)));
 }
 
+// ---------- Word (.docx), ZIP and Jira round trip ----------
+{
+  const M = await import('../js/model.js');
+  const D = await import('../js/gen/docs.js');
+  const X = await import('../js/gen/docx.js');
+  const Z = await import('../js/gen/zip.js');
+  const J = await import('../js/gen/jira.js');
+  const s = M.normalize(sampleProject());
+  const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64'));
+  // inline formatting
+  eq('inline runs: bold, code, italic', X.inlineRuns('A **b** `c` and _d_.').map((r) => `${r.b ? 'B' : r.code ? 'C' : r.i ? 'I' : '-'}${r.text}`), ['-A ', 'Bb', '- ', 'Cc', '- and ', 'Id', '-.']);
+  eq('snake_case words are not italic', X.inlineRuns('the field user_name_x').length, 1);
+  eq('XML escaping drops control characters', X.xmlEsc('a<b & "c"\u0001'), 'a&lt;b &amp; &quot;c&quot;');
+  eq('blocks: heading, table, list, quote, mermaid', X.mdBlocks('# T\n## H\n| a | b |\n| --- | --- |\n| 1 | x \\| y |\n- one\n- two\n> **Note** here\n```mermaid\nflowchart LR\n```').map((b) => b.t), ['h', 'h', 'table', 'ul', 'quote', 'mermaid']);
+  eq('escaped pipes stay in one cell', X.mdBlocks('| a | b |\n| --- | --- |\n| 1 | x \\| y |')[0].rows[0], ['1', 'x | y']);
+  const w = X.columnWidths(['ID', 'Description'], [['FR-1', 'A much longer description of the requirement that needs room']], 9638);
+  t('column widths fill the page and favour long text', w[0] + w[1] === 9638 && w[1] > w[0] * 1.5, JSON.stringify(w));
+  eq('brand colour tint', X.tint('#000000', 0.5), '808080');
+  // every document becomes well-formed Word XML
+  let bad = '';
+  let wideOk = true;
+  for (const d of D.DOC_LIST) {
+    const doc = D.buildDoc(s, d.id);
+    const images = X.mermaidBlocks(doc.markdown).map((c, i) => ({ data: png, w: i % 2 ? 1500 : 500, h: 400, wide: i % 2 === 1 }));
+    const { files, stats } = X.docxFiles({ title: doc.title, markdown: doc.markdown, meta: s.meta, images, org: 'Acme <R&D>', brand: { colour: '#b91c1c', footer: 'Confidential' }, logo: { data: png, type: 'png', w: 300, h: 100 } });
+    for (const [k, v] of Object.entries(files)) if (typeof v === 'string') { const e = X.xmlProblem(v); if (e) bad += `${d.id}/${k}: ${e}; `; }
+    if (images.some((i) => i.wide) && !stats.landscape) wideOk = false;
+    if (!files['word/document.xml'].includes('w:sectPr')) bad += `${d.id}: no section; `;
+  }
+  t('every document is well-formed Word XML', !bad, bad);
+  t('wide diagrams get landscape pages', wideOk);
+  const one = X.docxFiles({ title: 'Spec', markdown: D.buildDoc(s, 'core-functional').markdown, meta: s.meta, org: 'Acme', brand: { colour: '#123456', footer: 'Confidential' }, logo: { data: png, type: 'png', w: 300, h: 100 } });
+  const doc = one.files['word/document.xml'];
+  t('cover page, contents with links, and headings with bookmarks', one.stats.cover && one.stats.toc > 5 && doc.includes('<w:titlePg/>') && doc.includes('w:anchor="_Toc') && doc.includes('<w:bookmarkStart'));
+  t('brand colour in the styles and logo in header and cover', one.files['word/styles.xml'].includes('w:val="123456"') && one.files['word/_rels/header1.xml.rels'].includes('media/image1.png') && one.files['word/media/image1.png'] === png);
+  t('footer has the note, version and page numbers', /Confidential · Spec · v0/.test(one.files['word/footer1.xml']) && one.files['word/footer1.xml'].includes(' NUMPAGES '));
+  t('each ordered list restarts its numbering', (one.files['word/numbering.xml'].match(/<w:startOverride w:val="1"\/>/g) || []).length === (doc.match(/<w:numId w:val="(\d+)"/g) || []).filter((x, i, a) => !x.endsWith('"1"') && a.indexOf(x) === i).length);
+  t('a diagram that failed to draw falls back to its source', X.docxFiles({ title: 'x', markdown: '## A\n```mermaid\nflowchart LR\nA-->B\n```', images: [null] }).files['word/document.xml'].includes('A--&gt;B'));
+  const wideTable = X.docxFiles({ title: 'x', markdown: `# T\n## Matrix\n| ${'c | '.repeat(9)}\n|${' --- |'.repeat(9)}\n| ${'1 | '.repeat(9)}`, brand: { cover: false } });
+  eq('a table with 8+ columns goes on a landscape page', wideTable.stats.landscape, 1);
+  const noCover = X.docxFiles({ title: 'x', markdown: '# T\n## A\ntext', brand: { cover: false, toc: false } });
+  t('cover and contents can be switched off', !noCover.stats.cover && !noCover.files['word/document.xml'].includes('TOC \\o'));
+  // ZIP writer round trip
+  const zipped = await Z.zipFiles({ 'a.txt': 'hello é', 'b/c.xml': '<x>'.repeat(500), 'img.png': png });
+  const back = await Z.unzipFiles(zipped);
+  t('ZIP round trip keeps names and bytes', new TextDecoder().decode(back['a.txt']) === 'hello é' && new TextDecoder().decode(back['b/c.xml']) === '<x>'.repeat(500) && back['img.png'].length === png.length);
+  t('ZIP compresses repetitive XML', zipped.length < 1000);
+  const dz = await Z.unzipFiles(await Z.zipFiles(one.files));
+  eq('a .docx keeps every part', Object.keys(dz).sort(), Object.keys(one.files).sort());
+  // Jira
+  const csvText = J.jiraCsv(s, { stories: true, reqTypes: ['Functional'] });
+  const rows = parseCsvLocal(csvText);
+  const head = rows[0];
+  t('Jira CSV has the import columns', ['Issue Id', 'Parent', 'Issue Type', 'Summary', 'Description', 'Priority', 'Story Points', 'Labels'].every((h) => head.includes(h)));
+  const epics = rows.filter((r) => r[head.indexOf('Issue Type')] === 'Epic');
+  eq('one epic per epic name', epics.length, new Set(s.stories.map((x) => x.epic).filter(Boolean)).size);
+  const st = rows.find((r) => r[head.indexOf('BA Builder ID')] === s.stories[0].code);
+  t('stories point at their epic and carry acceptance criteria', st && epics.some((e) => e[0] === st[head.indexOf('Parent')]) && /\*Given\*/.test(st[head.indexOf('Description')]));
+  eq('summary drops the leading "to"', J.storySummary({ iWant: 'to enter the loan amount' }), 'Enter the loan amount');
+  eq('MoSCoW → Jira priority', s.stories.map((x) => J.PRIORITY_TO_JIRA[x.priority]).every(Boolean), true);
+  t('requirements export as Tasks with an ID label', rows.filter((r) => r[head.indexOf('Issue Type')] === 'Task').length === s.requirements.filter((r) => r.type === 'Functional').length && rows.some((r) => r.includes(`${J.ID_LABEL}FR-001`)));
+  // our own file read straight back changes nothing
+  const plan0 = J.planJiraImport(s, J.readJiraCsv(csvText));
+  t('re-importing the export changes nothing', plan0.updates.length === 0 && plan0.creates.length === 0 && plan0.skipped === epics.length, J.describePlan(plan0));
+  eq('priority and status mapping', [J.priorityFromJira('Highest'), J.priorityFromJira('Medium'), J.priorityFromJira('Low'), J.priorityFromJira('Lowest'), J.storyStatusFromJira('Selected for Development'), J.storyStatusFromJira('In Progress'), J.storyStatusFromJira('Code Review'), J.storyStatusFromJira('Closed'), J.storyStatusFromJira('To Do')], ['Must', 'Should', 'Could', "Won't", 'Ready', 'In progress', 'In review', 'Done', 'Backlog']);
+  // a Jira export: keys, statuses and a new issue come back
+  const s0 = s.stories[0], r0 = s.requirements.find((r) => r.type === 'Functional');
+  const jiraExport = [
+    'Summary,Issue key,Issue id,Issue Type,Status,Priority,Labels,Labels,Custom field (Story Points),Description,Parent summary',
+    `"${J.storySummary(s0)}",LOAN-11,10011,Story,Done,Highest,${J.ID_LABEL}${s0.code},mvp,4,"x",`,
+    `"${r0.code} ${r0.title}",LOAN-12,10012,Task,Done,Medium,,,,"",`,
+    'Add dark mode,LOAN-13,10013,Story,In Progress,Low,,,2,"Requested in Jira",Apply online',
+    'Calculator rounds wrongly,LOAN-14,10014,Bug,Open,High,,,,"Shows R 1 000.01",',
+    'Apply online,LOAN-1,10001,Epic,To Do,Medium,,,,,',
+  ].join('\n');
+  const plan = J.planJiraImport(s, J.readJiraCsv(jiraExport));
+  const u0 = plan.updates.find((u) => u.id === s0.id);
+  const after0 = { ...s0, ...(u0?.patch || {}) };
+  t('matched by label: key, status, priority and points (4 → nearest 3 or 5)', u0 && after0.jiraKey === 'LOAN-11' && after0.status === 'Done' && ['3', '5'].includes(String(after0.points)) && after0.priority === 'Must', JSON.stringify(u0));
+  const ur = plan.updates.find((u) => u.id === r0.id);
+  t('matched by summary: requirement becomes Implemented', ur && ur.patch.status === 'Implemented' && ur.patch.jiraKey === 'LOAN-12', JSON.stringify(ur));
+  eq('new Jira issues are added (story and bug), epics skipped', [plan.creates.map((c) => c.key), plan.skipped], [['stories', 'defects'], 1]);
+  const copy = JSON.parse(JSON.stringify(s));
+  const n = J.applyJiraImport(copy, plan);
+  const added = copy.stories[copy.stories.length - 1];
+  t('applying the plan updates and adds items with codes', n === plan.updates.length + plan.creates.length && added.jiraKey === 'LOAN-13' && /^US-/.test(added.code) && added.epic === 'Apply online' && copy.defects.some((d) => d.jiraKey === 'LOAN-14' && d.code));
+  eq('matched again by Jira key next time: nothing to change', J.planJiraImport(copy, J.readJiraCsv(jiraExport)).updates.length, 0);
+  let threw = '';
+  try { J.readJiraCsv('Name,Age\nA,1'); } catch (e) { threw = e.message; }
+  t('a non-Jira CSV is rejected with a clear message', /Jira CSV/.test(threw));
+}
+
+function parseCsvLocal(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"' && text[i + 1] === '"') (cell += '"'), i++; else if (ch === '"') q = false; else cell += ch; }
+    else if (ch === '"') q = true; else if (ch === ',') row.push(cell), (cell = '');
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) row.push(cell), rows.push(row);
+  return rows;
+}
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

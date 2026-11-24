@@ -1,8 +1,9 @@
 // Fast-capture buttons on register pages: paste a list, add starter blocks, and derive screens,
 // API endpoints and UAT tests from what is already in the project.
 import { project, update } from '../store.js';
-import { esc, $, $$, modal, toast } from '../ui.js';
-import { COLLECTIONS, uid, ensureCode } from '../model.js';
+import { esc, $, $$, modal, toast, download, pickFile, fileSafe, confirmBox } from '../ui.js';
+import { jiraCsv, readJiraCsv, planJiraImport, applyJiraImport, describePlan } from '../gen/jira.js';
+import { COLLECTIONS, REQ_TYPES, uid, ensureCode } from '../model.js';
 import { STARTERS } from '../templates.js';
 import { QUICK, itemsFromText, screenFromEntity, endpointsFromEntity, testsFromAcceptance } from '../gen/capture.js';
 import { openItem } from './collection.js';
@@ -15,12 +16,18 @@ export function captureButtons(key) {
   if (key === 'screens') b.push(`<button class="btn sm" data-cap="screen" title="A screen with a field for every attribute">From an entity</button>`);
   if (key === 'apis') b.push(`<button class="btn sm" data-cap="apis" title="List, get, create, update and delete">Endpoints from an entity</button>`);
   if (key === 'tests') b.push(`<button class="btn sm" data-cap="tests" title="One UAT test per acceptance scenario">Tests from acceptance criteria</button>`);
+  if (['stories', 'requirements', 'defects'].includes(key)) {
+    if (key !== 'defects') b.push(`<button class="btn sm" data-cap="jiraout" title="A CSV file to import into Jira (epics, stories, acceptance criteria, priority, points)">Export to Jira</button>`);
+    b.push(`<button class="btn sm" data-cap="jirain" title="Read a Jira CSV export: update status, priority, points and issue keys, and add issues created in Jira">Update from Jira</button>`);
+  }
   return b.join('');
 }
 
 export function wireCapture(root, key) {
   const on = (k, fn) => { const el = $(`[data-cap="${k}"]`, root); if (el) el.onclick = fn; };
   on('paste', () => pasteModal(key));
+  on('jiraout', () => jiraExportModal(key));
+  on('jirain', () => jiraImport());
   on('starters', () => startersModal(key));
   on('screen', () => entityPicker('Create a screen from an entity', (e) => {
     const id = uid('scr');
@@ -121,4 +128,40 @@ function entityPicker(title, done) {
   });
   $('[data-x]', m.el).onclick = m.close;
   $('[data-go]', m.el).onclick = () => { const e = p.entities.find((x) => x.id === $('[data-e]', m.el).value); m.close(); done(e); };
+}
+
+/** Choose what goes into the Jira import file, then download it. */
+export function jiraExportModal(from = 'stories') {
+  const p = project();
+  const types = REQ_TYPES.map((t) => t.value).filter((t) => p.requirements.some((r) => r.type === t));
+  const style = p.meta.specStyle || 'Both';
+  const m = modal({
+    title: 'Export to Jira (CSV)',
+    body: `<p class="muted" style="margin-top:0">In Jira: <b>Settings → System → External system import → CSV</b> (or <b>Import issues from CSV</b> in your project), then map the columns. Epics are linked with <b>Issue Id</b> and <b>Parent</b>; the <b>babid_…</b> label lets BA Builder match the issues when you bring a Jira export back.</p>
+      <label class="small" style="display:block;margin:6px 0"><input type="checkbox" data-js ${p.stories.length && (from === 'stories' || style !== 'Requirements') ? 'checked' : ''} ${p.stories.length ? '' : 'disabled'}> User stories (${p.stories.length}) with their epics and acceptance criteria</label>
+      ${types.map((t) => `<label class="small" style="display:block;margin:6px 0"><input type="checkbox" data-jt="${esc(t)}" ${t === 'Functional' && (from === 'requirements' || style === 'Requirements' || !p.stories.length) ? 'checked' : ''}> ${esc(t)} requirements (${p.requirements.filter((r) => r.type === t).length}) — as Tasks</label>`).join('')}`,
+    footer: '<span class="grow"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-go>Download CSV</button>',
+  });
+  $('[data-go]', m.el).onclick = () => {
+    const reqTypes = $$('[data-jt]', m.el).filter((c) => c.checked).map((c) => c.dataset.jt);
+    const stories = !!$('[data-js]', m.el)?.checked;
+    if (!stories && !reqTypes.length) return toast('Tick at least one thing to export', 'err');
+    download(`\uFEFF${jiraCsv(p, { stories, reqTypes })}`, `${fileSafe(p.meta.code || p.meta.name)}_jira_import.csv`, 'text/csv');
+    m.close();
+    toast('Jira import file downloaded');
+  };
+}
+
+/** Pick a Jira CSV export, show what would change, and apply it after confirmation. */
+export async function jiraImport() {
+  const f = await pickFile('.csv,text/csv');
+  if (!f) return;
+  try {
+    const plan = planJiraImport(project(), readJiraCsv(f.text));
+    if (!plan.updates.length && !plan.creates.length) return toast(`Nothing to change — ${describePlan(plan)}`);
+    if (!(await confirmBox(`From ${f.name}: ${describePlan(plan)}. Continue? (Undo is available afterwards.)`, 'Update'))) return;
+    let n = 0;
+    update((pr) => { n = applyJiraImport(pr, plan); });
+    toast(`Updated from Jira: ${n} item${n === 1 ? '' : 's'}`);
+  } catch (e) { toast(e.message, 'err'); }
 }

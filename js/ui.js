@@ -161,7 +161,7 @@ export function download(content, filename, type = 'text/plain') {
   setTimeout(() => (URL.revokeObjectURL(a.href), a.remove()), 500);
 }
 
-export function pickFile(accept) {
+export function pickFile(accept, as = 'text') {
   return new Promise((resolve) => {
     const i = Object.assign(document.createElement('input'), { type: 'file', accept });
     i.onchange = () => {
@@ -169,7 +169,8 @@ export function pickFile(accept) {
       if (!f) return resolve(null);
       const r = new FileReader();
       r.onload = () => resolve({ name: f.name, text: r.result });
-      r.readAsText(f);
+      if (as === 'dataurl') r.readAsDataURL(f);
+      else r.readAsText(f);
     };
     i.click();
   });

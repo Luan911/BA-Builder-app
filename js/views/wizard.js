@@ -191,7 +191,7 @@ function reviewStep(el, p) {
       <section class="card"><h2 style="margin-bottom:8px">Download your SRS</h2>
         <p class="muted small">${fr.length} functional and ${nfr.length} quality requirements, ${p.usecases.length} use cases, ${p.entities.length} data entities.</p>
         <div class="row" style="margin:12px 0">
-          <button class="btn primary lg" data-word>Download Word (.doc)</button>
+          <button class="btn primary lg" data-word>Download Word (.docx)</button>
           <button class="btn lg" data-pdf>PDF / print</button>
           <button class="btn lg" data-md>Markdown</button>
         </div>
@@ -201,11 +201,11 @@ function reviewStep(el, p) {
     </div>
     <h2 style="margin:20px 0 10px">Preview</h2>
     <article class="paper" data-paper>${mdToHtml(doc.markdown)}</article>`;
-  import('./documents.js').then(({ docHtml }) => {
+  import('./documents.js').then(({ docxBlob }) => {
     const base = `${fileSafe(p.meta.code || p.meta.name)}_SRS_v${fileSafe(p.meta.version || '0.1')}`;
     $('[data-word]', el).onclick = async (e) => {
       e.target.disabled = true;
-      try { download(await docHtml(p, 'srs', 'png'), `${base}.doc`, 'application/msword'); toast('SRS downloaded'); } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
+      try { download(await docxBlob(p, 'srs'), `${base}.docx`); toast('SRS downloaded'); } catch (err) { toast(err.message, 'err'); } finally { e.target.disabled = false; }
     };
     $('[data-md]', el).onclick = () => download(doc.markdown, `${base}.md`, 'text/markdown');
     $('[data-pdf]', el).onclick = () => window.print();

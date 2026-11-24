@@ -116,6 +116,12 @@ requirements, NFRs, rules, processes, screens, data model, dictionary, mapping, 
 permissions, tests, RTM, defects, RAID, decisions, changes, glossary, approval…) and export one
 combined document — e.g. a sign-off pack.
 
+**Word (.docx)** files are real Word documents: a cover page with your logo and organisation, a
+clickable contents list, headings in Word's navigation pane, numbered lists, tables with repeating
+header rows, page numbers, and wide diagrams and wide tables on landscape pages. Set the logo, brand
+colour, footer note (e.g. "Confidential"), cover page and contents under **Projects & export →
+Document branding**.
+
 **Copy rich text** pastes headings, tables and diagrams cleanly into Word, Confluence, Google Docs
 or Outlook.
 
@@ -127,12 +133,21 @@ Specification · Traceability Matrix · UAT Plan & Results · RAID & Decision Lo
 Request Log · Release & Transition Plan · Cost & Schedule Estimate · **Data Mapping
 Specification** · **Solution Architecture Overview** · **Business Analysis Plan & Performance** · Glossary.
 
-Each exports to **Word (.doc)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
+Each exports to **Word (.docx)**, **PDF** (print), **HTML** or **Markdown**, with diagrams embedded.
 
 ### Technical exports
 OpenAPI 3.0 YAML · **Postman collection** · PostgreSQL DDL · JSON Schema · RTM CSV · every register as CSV ·
 a complete ZIP pack · the project file (JSON) for backup and sharing.
 Requirements, stories, stakeholders, RAID, tests, questions and glossary can be imported from CSV.
+
+### Jira round trip
+- **Export to Jira** (on the stories and requirements pages, or Projects & export) makes a CSV for
+  Jira's CSV importer: one Epic per epic name, Stories linked to their epic (Issue Id / Parent), the
+  acceptance criteria in the description, priority (Must → High, Should → Medium, Could → Low,
+  Won't → Lowest), story points, status, and a `babid_US-001` label.
+- **Update from Jira** reads a Jira CSV export and, after showing what will change, brings back issue
+  keys, status, priority and story points. Items are matched by the `babid_` label, then the Jira key,
+  then the summary. Stories and bugs created in Jira are added. Undo works as usual.
 
 ## Technical BA toolkit
 - **SQL workbench** — runs real SQLite in the browser on tables built from your data model and
@@ -212,8 +227,8 @@ Pages serve the files as they are.
 ## Notes
 - Data lives in your browser's local storage. Export the project file to back it up or
   move it to another machine.
-- Diagrams use [Mermaid](https://mermaid.js.org) and the ZIP export uses JSZip, both loaded
-  from the jsDelivr CDN on first use (internet needed for those features).
+- Diagrams use [Mermaid](https://mermaid.js.org), loaded from the jsDelivr CDN on first use
+  (internet needed for diagrams). Word files and the ZIP pack are built in the browser with no library.
 - Undo with **Ctrl+Z**.
 
 ## Tests
@@ -221,9 +236,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-299 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+332 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-splitting big diagrams (nothing lost, no part too big), normalising to 3NF, Simple mode, paste-to-add, starter blocks, derived screens / endpoints / tests, templates, core documents and the document builder, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), normalising to 3NF, Simple mode, paste-to-add, starter blocks, derived screens / endpoints / tests, templates, core documents and the document builder, well-formed Word (.docx) files (cover, contents, landscape pages, branding), the ZIP writer, the Jira CSV export and import round trip, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs

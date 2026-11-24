@@ -54,6 +54,18 @@
     const ce = w.console.error.bind(w.console);
     w.console.error = (...a) => { w.__babErrors.push(a.map(String).join(' ')); ce(...a); };
     w.HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push({ name: this.download, href: this.href }); };
+    // file pickers: the next file to "choose" is set by the test
+    let nextFile = null;
+    const inputClick = w.HTMLInputElement.prototype.click;
+    w.HTMLInputElement.prototype.click = function () {
+      if (this.type !== 'file') return inputClick.call(this);
+      const dt = new w.DataTransfer();
+      if (nextFile) dt.items.add(nextFile);
+      this.files = dt.files;
+      nextFile = null;
+      this.onchange?.();
+    };
+    const bytesOf = async (href) => new Uint8Array(await (await fetch(href)).arrayBuffer());
     w.print = () => downloads.push({ name: 'print' });
     await until(() => view() && view().innerText.length > 50);
     check('app starts with the example project', /Digital Personal Loan Origination/.test(d.body.innerText));
@@ -224,12 +236,12 @@
     // exports
     downloads.length = 0;
     await go('#/settings', 300);
-    for (const b of $$('.btn', view()).filter((x) => /\.(yaml|json|sql|csv|zip)|Postman|OpenAPI|DDL|Schema|RTM|project file|ZIP/i.test(x.innerText) && !/Import|Delete|New|Load/i.test(x.innerText))) { b.click(); await sleep(400); }
+    for (const b of $$('.btn', view()).filter((x) => /\.(yaml|json|sql|csv|zip)|Postman|OpenAPI|DDL|Schema|RTM|project file|ZIP/i.test(x.innerText) && !/Import|Delete|New|Load|Jira|Complete pack/i.test(x.innerText))) { b.click(); await sleep(400); }
     await until(() => downloads.length >= 5, 15000);
     check('exports download files', downloads.length >= 5, downloads.map((x) => x.name).join(', '));
     downloads.length = 0;
     await go('#/docs/srs', 300); $('[data-word]', view()).click();
-    check('Word export of the SRS', await until(() => downloads.some((x) => /\.doc$/.test(x.name)), 30000));
+    check('Word export of the SRS', await until(() => downloads.some((x) => /\.docx$/.test(x.name)), 30000));
     $('[data-md]', view()).click(); await sleep(150);
     check('Markdown export', downloads.some((x) => /\.md$/.test(x.name)));
     await go('#/masterclass', 200); $('[data-dl]', view()).click(); await sleep(200);
@@ -306,8 +318,83 @@
     const sec = $('[data-sec="glossary"]', view()); sec.checked = !sec.checked; sec.dispatchEvent(new w.Event('change')); await sleep(300);
     check('document builder updates the sections', (JSON.parse(w.localStorage.getItem('bab.settings')).compose?.sections || []).includes('glossary') === sec.checked);
     downloads.length = 0; $('[data-word]', view()).click();
-    check('document builder exports to Word', await until(() => downloads.some((x) => /\.doc$/.test(x.name)), 30000));
+    check('document builder exports to Word', await until(() => downloads.some((x) => /\.docx$/.test(x.name)), 30000));
     check('daily-use features raise no errors', !errorsSince(n).length, errorsSince(n).join(' | ').slice(0, 300));
+
+    // ---- 6. Word (.docx), branding and Jira ----
+    log('6. Word files, branding and Jira…');
+    const n6 = w.__babErrors.length;
+    const { unzipFiles } = await import('../js/gen/zip.js');
+    const { mermaidBlocks } = await import('../js/gen/docx.js');
+    // back to the example project (section 5 left a project made from a template open)
+    await go('#/settings', 300);
+    $$('[data-open]', view()).find((b) => /Digital Personal Loan/.test(b.closest('tr').innerText))?.click(); await sleep(300);
+    check('example project open again', /Digital Personal Loan/.test(proj().meta.name) && proj().stories.length > 0);
+    await go('#/settings', 300);
+    const setVal = (sel, v) => { const el = $(sel, view()); el.value = v; el.dispatchEvent(new w.Event('change')); };
+    setVal('[data-bfoot]', 'Confidential'); setVal('[data-bcol]', '#b91c1c'); setVal('[data-org]', 'E2E Bank');
+    const pngBytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    nextFile = new w.File([pngBytes], 'logo.png', { type: 'image/png' });
+    $('[data-blogo]', view()).click();
+    check('logo upload is stored', await until(() => /^data:image\/png/.test(JSON.parse(w.localStorage.getItem('bab.settings')).brand?.logo?.url || ''), 5000));
+    const br = JSON.parse(w.localStorage.getItem('bab.settings')).brand;
+    check('branding settings saved', br.footer === 'Confidential' && br.colour === '#b91c1c' && JSON.parse(w.localStorage.getItem('bab.settings')).org === 'E2E Bank', JSON.stringify({ ...br, logo: !!br.logo }));
+    // a real .docx with real diagrams
+    await go('#/docs/core-data', 300);
+    downloads.length = 0; $('[data-word]', view()).click();
+    check('Word (.docx) export of the data specification', await until(() => downloads.some((x) => /\.docx$/.test(x.name)), 45000));
+    const dx = downloads.find((x) => /\.docx$/.test(x.name));
+    if (dx) {
+      const parts = await unzipFiles(await bytesOf(dx.href));
+      const xml = new TextDecoder().decode(parts['word/document.xml'] || new Uint8Array());
+      const parsed = new DOMParser().parseFromString(xml, 'application/xml');
+      check('the .docx body is valid XML', xml.length > 1000 && !parsed.querySelector('parsererror'), parsed.querySelector('parsererror')?.textContent?.slice(0, 200));
+      for (const k of ['word/styles.xml', 'word/header1.xml', 'word/footer1.xml', 'word/numbering.xml', '[Content_Types].xml']) check(`${k} is valid XML`, parts[k] && !new DOMParser().parseFromString(new TextDecoder().decode(parts[k]), 'application/xml').querySelector('parsererror'));
+      const { buildDoc } = await import('../js/gen/docs.js');
+      const diagrams = mermaidBlocks(buildDoc(proj(), 'core-data').markdown).length;
+      const pics = (xml.match(/<pic:pic>/g) || []).length;
+      check('every diagram is embedded as a picture (plus the cover logo)', pics === diagrams + 1, `${pics} pictures for ${diagrams} diagrams`);
+      const pngs = Object.keys(parts).filter((k) => /^word\/media\/.*\.png$/.test(k));
+      check('pictures are real PNG files', pngs.length === diagrams + 1 && pngs.every((k) => parts[k][0] === 0x89 && parts[k][1] === 0x50), pngs.join(', '));
+      check('the brand colour and footer note are used', new TextDecoder().decode(parts['word/styles.xml']).includes('B91C1C') && new TextDecoder().decode(parts['word/footer1.xml']).includes('Confidential'));
+      check('the organisation is on the cover and in the header', xml.includes('E2E Bank') && new TextDecoder().decode(parts['word/header1.xml']).includes('E2E Bank'));
+      w.__lastDocx = dx.href;
+    }
+    // Jira export
+    await go('#/c/stories', 300);
+    $('[data-cap="jiraout"]', view()).click(); await sleep(200);
+    downloads.length = 0; $('.backdrop [data-go]').click(); await sleep(300);
+    const jx = downloads.find((x) => /_jira_import\.csv$/.test(x.name));
+    check('Jira CSV downloaded from the stories page', !!jx);
+    if (jx) {
+      const text = new TextDecoder().decode(await bytesOf(jx.href));
+      check('Jira CSV has epics, stories and ID labels', /Issue Id,Parent,Issue Type,Summary/.test(text) && /,Epic,/.test(text) && /,Story,/.test(text) && /babid_US-001/.test(text));
+      // bring a Jira export back: a key, a status change and a new story
+      const story = proj().stories[0];
+      const jiraBack = `Summary,Issue key,Issue Type,Status,Priority,Labels,Custom field (Story Points)\n"anything",E2E-1,Story,In Review,Medium,babid_${story.code},8\nBrand new from Jira,E2E-2,Story,To Do,Low,,3\n`;
+      nextFile = new w.File([jiraBack], 'jira.csv', { type: 'text/csv' });
+      $('[data-cap="jirain"]', view()).click();
+      await until(() => $('.backdrop [data-yes]'), 3000);
+      check('Jira import asks first and says what will change', /update 1 item.*add 1 new/.test($('.backdrop')?.innerText || ''), $('.backdrop')?.innerText?.slice(0, 200));
+      $('.backdrop [data-yes]')?.click(); await sleep(400);
+      const after = proj().stories.find((x) => x.id === story.id);
+      check('Jira import updates key, status and points', after.jiraKey === 'E2E-1' && after.status === 'In review' && after.points === '8', JSON.stringify({ k: after.jiraKey, s: after.status, p: after.points }));
+      check('Jira import adds the new story', proj().stories.some((x) => x.jiraKey === 'E2E-2' && /^US-/.test(x.code)));
+      check('the stories table shows the change', /E2E|In review/.test(view().innerText));
+    }
+    await go('#/c/requirements', 300);
+    check('requirements page offers Jira export and update', !!$('[data-cap="jiraout"]', view()) && !!$('[data-cap="jirain"]', view()));
+    // complete pack: a ZIP with Word files inside
+    await go('#/settings', 300);
+    downloads.length = 0; $('[data-zip]', view()).click();
+    check('complete pack downloads', await until(() => downloads.some((x) => /\.zip$/.test(x.name)), 180000));
+    const zx = downloads.find((x) => /\.zip$/.test(x.name));
+    if (zx) {
+      const files = await unzipFiles(await bytesOf(zx.href));
+      const names = Object.keys(files);
+      check('the pack has a .docx for every document plus specs and the project file', names.filter((x) => /^documents\/.*\.docx$/.test(x)).length === DOC_LIST.length && names.some((x) => x.endsWith('openapi.yaml')) && names.some((x) => x.endsWith('.babuilder.json')), names.length + ' files');
+    }
+    check('Word, branding and Jira raise no errors', !errorsSince(n6).length, errorsSince(n6).join(' | ').slice(0, 300));
     check('no errors in the whole run (including daily-use features)', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
     check('no errors in the whole run', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
   } catch (e) {

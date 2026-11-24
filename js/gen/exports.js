@@ -4,7 +4,7 @@ import { COLLECTIONS, byId, nameOf } from '../model.js';
 const plain = (html) => String(html ?? '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
 const csvCell = (v) => {
   const s = String(v ?? '');
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 export const csv = (head, rows) => [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 
@@ -33,6 +33,28 @@ function findLabel(p, id) {
   return id;
 }
 export const plainText = plain;
+
+/** Minimal RFC 4180 CSV parser. */
+export function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') (cell += '"'), i++;
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',') row.push(cell), (cell = '');
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if (cell || row.length) row.push(cell), rows.push(row);
+  return rows.filter((r) => r.some((c) => c.trim()));
+}
+
 
 // ---------- YAML (enough for OpenAPI) ----------
 function yaml(v, ind = 0) {

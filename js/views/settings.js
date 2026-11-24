@@ -1,33 +1,33 @@
 // Projects, import / export, technical exports and preferences.
 import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings, templates, saveTemplate, deleteTemplate } from '../store.js';
 import { templateFrom } from '../gen/capture.js';
+import { jiraExportModal, jiraImport } from './capture.js';
 import { esc, $, $$, toast, download, pickFile, fileSafe, confirmBox } from '../ui.js';
 import { COLLECTIONS, uid, ensureCode, normalize } from '../model.js';
-import { openApi, sqlDdl, jsonSchemas, rtmCsv, toCsv, postmanCollection } from '../gen/exports.js';
+import { openApi, sqlDdl, jsonSchemas, rtmCsv, toCsv, postmanCollection, parseCsv } from '../gen/exports.js';
 import { DOC_LIST, buildDoc } from '../gen/docs.js';
 import { allDiagrams } from '../gen/diagrams.js';
 import { exportSvg } from './canvas.js';
+import { zipFiles } from '../gen/zip.js';
+import { DEFAULT_BRAND } from '../gen/docx.js';
 
-/** Minimal RFC 4180 CSV parser. */
-export function parseCsv(text) {
-  const rows = [];
-  let row = [], cell = '', q = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (q) {
-      if (ch === '"' && text[i + 1] === '"') (cell += '"'), i++;
-      else if (ch === '"') q = false;
-      else cell += ch;
-    } else if (ch === '"') q = true;
-    else if (ch === ',') row.push(cell), (cell = '');
-    else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(cell); rows.push(row); row = []; cell = '';
-    } else cell += ch;
-  }
-  if (cell || row.length) row.push(cell), rows.push(row);
-  return rows.filter((r) => r.some((c) => c.trim()));
+/** Shrink a logo to at most 600 × 240 px and keep it as a PNG data URL (transparency kept). */
+function logoFrom(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w0 = img.naturalWidth || 600, h0 = img.naturalHeight || 240;
+      const k = Math.min(1, 600 / w0, 240 / h0);
+      const c = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(w0 * k)), height: Math.max(1, Math.round(h0 * k)) });
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve({ url: c.toDataURL('image/png'), w: c.width, h: c.height });
+    };
+    img.onerror = () => reject(new Error('That file could not be read as an image'));
+    img.src = url;
+  });
 }
+
+export { parseCsv };
 
 const IMPORTABLE = ['requirements', 'stories', 'stakeholders', 'glossary', 'raid', 'tests', 'questions'];
 
@@ -58,19 +58,15 @@ function importCsv(key, text) {
 }
 
 async function zipAll(p, onStep) {
-  await new Promise((res, rej) => {
-    if (window.JSZip) return res();
-    const s = Object.assign(document.createElement('script'), { src: 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js', onload: res, onerror: () => rej(new Error('Could not load the ZIP library — check your connection')) });
-    document.head.appendChild(s);
-  });
-  const { docHtml } = await import('./documents.js');
-  const zip = new window.JSZip();
+  const { docxBlob } = await import('./documents.js');
+  const files = {};
+  const zip = { file: (name, content) => (files[name] = content) };
   const code = fileSafe(p.meta.code || p.meta.name);
   for (const [i, d] of DOC_LIST.entries()) {
     onStep(`Document ${i + 1}/${DOC_LIST.length}`);
     const n = `${String(i + 1).padStart(2, '0')}_${fileSafe(d.title)}`;
     zip.file(`documents/${n}.md`, buildDoc(p, d.id).markdown);
-    zip.file(`documents/${n}.doc`, await docHtml(p, d.id, 'png'));
+    zip.file(`documents/${n}.docx`, new Uint8Array(await (await docxBlob(p, d.id)).arrayBuffer()));
   }
   for (const dg of allDiagrams(p)) zip.file(`diagrams/${fileSafe(dg.title)}.mmd`, dg.code);
   for (const c of p.canvases) zip.file(`diagrams/whiteboard_${fileSafe(c.name)}.svg`, exportSvg(c));
@@ -82,13 +78,14 @@ async function zipAll(p, onStep) {
   for (const k of Object.keys(COLLECTIONS)) if (p[k].length) zip.file(`registers/${fileSafe(COLLECTIONS[k].title)}.csv`, toCsv(k, p));
   zip.file(`${code}.babuilder.json`, JSON.stringify(p, null, 2));
   onStep('Compressing');
-  return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  return new Blob([await zipFiles(files)], { type: 'application/zip' });
 }
 
 export function renderSettings(root) {
   const p = project();
   const s = getSettings();
   const code = fileSafe(p.meta.code || p.meta.name);
+  const brand = { ...DEFAULT_BRAND, ...(s.brand || {}) };
   root.innerHTML = `
     <div class="page-head"><div><h1>Projects & export</h1><p>Everything is stored in this browser. Export a project file to back it up or share it with another analyst.</p></div></div>
     <section class="card flush"><div class="card-head"><h2>Projects</h2><span class="grow"></span><input type="text" placeholder="New project name" data-pname style="max-width:240px">${templates().length ? `<select data-ptpl style="max-width:200px" aria-label="Template"><option value="">Blank</option>${templates().map((t) => `<option>${esc(t.name)}</option>`).join('')}</select>` : ''}<button class="btn sm primary" data-new>+ New project</button><button class="btn sm" data-sample>Add example project</button><button class="btn sm" data-import>Import project file</button></div>
@@ -106,13 +103,16 @@ export function renderSettings(root) {
         <button class="btn" data-sql>Database DDL (.sql)</button>
         <button class="btn" data-jss>JSON Schemas (.json)</button>
         <button class="btn" data-rtm>Traceability matrix (.csv)</button>
+        <button class="btn" data-jiraout>Jira import file (.csv)</button>
       </div>
-      <p class="muted small" style="margin-top:10px">The complete pack contains all 18 documents (Word + Markdown), every diagram source, whiteboards, technical specs, CSV registers and the project file.</p>
+      <p class="muted small" style="margin-top:10px">The complete pack contains every document (Word .docx + Markdown), every diagram source, whiteboards, technical specs, CSV registers and the project file.</p>
     </section>
 
     <section class="card"><h2>Import from CSV / Excel</h2>
       <p class="muted small">Save a sheet as CSV with a heading row. Columns are matched to field names (e.g. Title, Requirement statement, Type, Priority).</p>
       <div class="row"><select data-ckey style="max-width:240px">${IMPORTABLE.map((k) => `<option value="${k}">${esc(COLLECTIONS[k].title)}</option>`).join('')}</select><button class="btn" data-csvin>Choose CSV file…</button><button class="btn ghost" data-tpl>Download template</button></div>
+      <p class="muted small" style="margin-top:12px">From Jira: export your issues as CSV (all fields) and bring back status, priority, story points and issue keys. New Jira stories and bugs are added.</p>
+      <div class="row"><button class="btn" data-jirain>Update from a Jira export…</button></div>
     </section>
 
     <section class="card flush"><div class="card-head"><h2>Project templates</h2><span class="grow"></span><button class="btn sm primary" data-savetpl>Save "${esc(p.meta.name || 'this project')}" as a template</button></div>
@@ -120,9 +120,15 @@ export function renderSettings(root) {
       ${templates().length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Template</th><th>Contains</th><th>Saved</th><th></th></tr></thead><tbody>${templates().map((t) => `<tr><td><b>${esc(t.name)}</b></td><td class="small">${['personas', 'stakeholders', 'glossary', 'requirements', 'rules', 'raid'].map((k) => `${(t.data?.[k] || []).length} ${k === 'requirements' ? 'NFRs' : k}`).join(' · ')}</td><td class="small">${esc(String(t.createdAt || '').slice(0, 10))}</td><td><button class="btn sm danger" data-deltpl="${esc(t.name)}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted" style="padding:0 16px 12px">No templates yet.</p>'}
     </section>
 
-    <section class="card"><h2>Preferences</h2>
+    <section class="card"><h2>Document branding</h2>
+      <p class="muted small">Used in Word (.docx) files: cover page, header, footer, heading colour and table headers. HTML, PDF and rich-text copies use the colour too.</p>
       <div class="form" style="margin-top:10px">
-        <label class="field"><span>Organisation (document footer)</span><input type="text" data-org value="${esc(s.org)}"></label>
+        <label class="field"><span>Organisation</span><input type="text" data-org value="${esc(s.org)}" placeholder="Your company or client"></label>
+        <label class="field"><span>Footer note</span><input type="text" data-bfoot value="${esc(brand.footer || '')}" placeholder="e.g. Confidential"></label>
+        <label class="field"><span>Brand colour</span><span class="row" style="gap:8px"><input type="color" data-bcol value="${esc(brand.colour)}" style="width:56px;height:34px;padding:2px"><button class="btn sm ghost" data-bcolreset type="button">Default</button></span></label>
+        <div class="field"><span>Logo (PNG, JPG or SVG)</span><span class="row" style="gap:8px;align-items:center">${brand.logo?.url ? `<img src="${esc(brand.logo.url)}" alt="Logo" data-blogoimg style="max-height:40px;max-width:160px;background:#fff;padding:3px;border-radius:4px">` : ''}<button class="btn sm" data-blogo type="button">${brand.logo?.url ? 'Change' : 'Upload logo'}</button>${brand.logo?.url ? '<button class="btn sm danger" data-blogox type="button">Remove</button>' : ''}</span></div>
+        <label class="small"><input type="checkbox" data-bcover ${brand.cover ? 'checked' : ''}> Cover page</label>
+        <label class="small"><input type="checkbox" data-btoc ${brand.toc ? 'checked' : ''}> Contents list</label>
       </div>
     </section>`;
 
@@ -167,6 +173,8 @@ export function renderSettings(root) {
   $('[data-sql]', root).onclick = () => download(sqlDdl(p), `${code}_schema.sql`, 'application/sql');
   $('[data-jss]', root).onclick = () => download(jsonSchemas(p), `${code}_schemas.json`, 'application/json');
   $('[data-rtm]', root).onclick = () => download(rtmCsv(p), `${code}_RTM.csv`, 'text/csv');
+  $('[data-jiraout]', root).onclick = () => jiraExportModal('stories');
+  $('[data-jirain]', root).onclick = () => jiraImport();
   $('[data-zip]', root).onclick = async (e) => {
     const btn = e.target;
     btn.disabled = true;
@@ -182,5 +190,18 @@ export function renderSettings(root) {
     const key = $('[data-ckey]', root).value;
     download(`${COLLECTIONS[key].fields.filter((f) => !['multi', 'rows'].includes(f.type) && !(f.type === 'select' && typeof f.options === 'function')).map((f) => f.label).join(',')}\r\n`, `${fileSafe(COLLECTIONS[key].title)}_template.csv`, 'text/csv');
   };
-  $('[data-org]', root).onchange = (e) => saveSettings({ org: e.target.value.trim() });
+  $('[data-org]', root).onchange = (e) => saveSettings({ org: e.target.value.trim() }, { quiet: true });
+  const setBrand = (patch, quiet = true) => saveSettings({ brand: { ...DEFAULT_BRAND, ...(getSettings().brand || {}), ...patch } }, { quiet });
+  $('[data-bfoot]', root).onchange = (e) => setBrand({ footer: e.target.value.trim() });
+  $('[data-bcol]', root).onchange = (e) => setBrand({ colour: e.target.value });
+  $('[data-bcolreset]', root).onclick = () => setBrand({ colour: DEFAULT_BRAND.colour }, false);
+  $('[data-bcover]', root).onchange = (e) => setBrand({ cover: e.target.checked });
+  $('[data-btoc]', root).onchange = (e) => setBrand({ toc: e.target.checked });
+  $('[data-blogo]', root).onclick = async () => {
+    const f = await pickFile('image/png,image/jpeg,image/svg+xml', 'dataurl');
+    if (!f) return;
+    try { setBrand({ logo: await logoFrom(f.text) }, false); toast('Logo saved — it appears on Word documents'); } catch (e) { toast(e.message, 'err'); }
+  };
+  const lx = $('[data-blogox]', root);
+  if (lx) lx.onclick = () => setBrand({ logo: null }, false);
 }
