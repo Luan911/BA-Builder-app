@@ -475,6 +475,13 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   const links = [...lessons.flatMap((l) => l.try.map((x) => x[0])), ...C.TECHNIQUES.map((x) => x[2]), ...BANK.map((q) => q[5][0])];
   const broken = links.filter((h) => !valid(h));
   eq('every in-app link points at a real screen', broken, []);
+  // the sidebar: every entry is a well-formed [route, label, count?] and points at a real screen
+  const { readFileSync } = await import('node:fs');
+  const NAV = eval(readFileSync(new URL('../js/app.js', import.meta.url), 'utf8').match(/const NAV = (\[[\s\S]*?\n\]);/)[1]);
+  const items = NAV.flatMap(([, list]) => list);
+  eq('sidebar entries are well formed (no item nested inside another)', items.filter((x) => x.length > 3 || x.some((y) => Array.isArray(y))).map((x) => x[1]), []);
+  eq('every sidebar link opens a real screen', items.filter((x) => !valid(`#/${x[0]}`)).map((x) => x[1]), []);
+  t('reviews and lessons learned are in the sidebar', ['c/reviews', 'c/lessons'].every((r) => items.some((x) => x[0] === r)));
 }
 
 console.log(`${pass} passed, ${fail} failed`);
