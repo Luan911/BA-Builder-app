@@ -224,11 +224,30 @@ origination) loads on first run so every screen has content; add your own projec
 Settings → Pages → *Deploy from a branch* → `main` / `(root)`. The `.nojekyll` file makes
 Pages serve the files as they are.
 
+## Works offline
+- Every library ships with the app in `vendor/` (Mermaid for diagrams, the ELK tidy layout, and
+  sql.js for the SQL workbench — all MIT licensed), so nothing is loaded from the internet.
+- Opened from a web address (e.g. GitHub Pages), BA Builder saves itself on the device the first
+  time (a service worker, `sw.js`) and then opens and works with no connection. It can also be
+  installed as an app from the browser's address bar. When a new version is published, a notice
+  offers **Reload now** — nothing changes under you mid-task.
+- Run locally (`localhost`), every file is already on your computer, so no internet is needed either.
+- After changing any app file, run `node tools/offline-list.mjs` so the offline copy is refreshed
+  (the unit tests fail if you forget).
+
+## Backups
+Your work is stored in this browser only, so BA Builder helps you keep a copy:
+- **Back up everything** (Projects & export → Backups & offline) downloads one `.json` file with
+  every project, your templates and branding. **Restore from a backup** shows exactly which projects
+  will be replaced, added or kept (and warns if this browser has newer work) before doing it.
+- **Backup reminder:** a notice appears when something has changed and the last backup is older
+  than your chosen interval (every day / week / month, or never). "Remind me tomorrow" snoozes it.
+- **Restore points:** saved automatically in the browser once a day while you work, and before you
+  delete a project or restore a backup. Go back to any of them in one click (your current work is
+  saved as a restore point first). The newest 12 are kept.
+- Backing up also asks the browser to protect BA Builder's storage from automatic clean-up.
+
 ## Notes
-- Data lives in your browser's local storage. Export the project file to back it up or
-  move it to another machine.
-- Diagrams use [Mermaid](https://mermaid.js.org), loaded from the jsDelivr CDN on first use
-  (internet needed for diagrams). Word files and the ZIP pack are built in the browser with no library.
 - Undo with **Ctrl+Z**.
 
 ## Tests
@@ -236,9 +255,9 @@ Pages serve the files as they are.
 ```bash
 node tests/unit.mjs
 ```
-332 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
+354 checks of the maths and rules: NPV, ROI, IRR, payback, PERT, confidence ranges, working-day
 dates (weekends, holidays, leap years, month and year ends), risk / RICE / WSJF scores, ID numbering,
-splitting big diagrams (nothing lost, no part too big), normalising to 3NF, Simple mode, paste-to-add, starter blocks, derived screens / endpoints / tests, templates, core documents and the document builder, well-formed Word (.docx) files (cover, contents, landscape pages, branding), the ZIP writer, the Jira CSV export and import round trip, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
+splitting big diagrams (nothing lost, no part too big), normalising to 3NF, Simple mode, paste-to-add, starter blocks, derived screens / endpoints / tests, templates, core documents and the document builder, well-formed Word (.docx) files (cover, contents, landscape pages, branding), the ZIP writer, the Jira CSV export and import round trip, offline readiness (bundled libraries, no CDN, an up-to-date offline file list), backup files, restore plans and backup reminders, UML notation rules, SQL sample data, API and data-mapping checks, architecture views, the focus view, every requirement-quality rule, and that every built-in NFR template passes the quality checks.
 
 ```bash
 node tests/smoke.mjs

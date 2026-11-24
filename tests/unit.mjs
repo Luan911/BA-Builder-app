@@ -640,6 +640,54 @@ t('markdown mermaid block', mdToHtml('```mermaid\ngraph TD\nA-->B\n```').include
   t('a non-Jira CSV is rejected with a clear message', /Jira CSV/.test(threw));
 }
 
+// ---------- offline and backups ----------
+{
+  const B = await import('../js/backup.js');
+  const O = await import('../tools/offline-list.mjs');
+  const M = await import('../js/model.js');
+  const { readFileSync, existsSync } = await import('node:fs');
+  // no library is loaded from the internet first
+  const code = ['js/mermaid.js', 'js/views/sql.js'].map((x) => readFileSync(x, 'utf8')).join('\n');
+  t('diagrams and SQL load the bundled copies first', /LOCAL_MERMAID = new URL\('\.\.\/vendor\/mermaid\//.test(code) && /importEither\(LOCAL_MERMAID, CDN_MERMAID\)/.test(code) && /new URL\('\.\.\/\.\.\/vendor\/sql\.js\/'/.test(code));
+  t('bundled libraries are present', ['vendor/mermaid/mermaid.esm.min.js', 'vendor/layout-elk/mermaid-layout-elk.esm.min.js', 'vendor/sql.js/sql-wasm.js', 'vendor/sql.js/sql-wasm.wasm', 'vendor/mermaid/LICENSE', 'vendor/sql.js/LICENSE'].every((x) => existsSync(x)));
+  const chunkRefs = [...readFileSync('vendor/mermaid/mermaid.esm.min.js', 'utf8').matchAll(/from"(\.\/chunks\/[^"]+)"/g)].map((m) => `vendor/mermaid/${m[1].slice(2)}`);
+  t('every chunk Mermaid imports is bundled', chunkRefs.length > 0 && chunkRefs.every((x) => existsSync(x)), chunkRefs.filter((x) => !existsSync(x)).join(', '));
+  const nonLocal = ['js', 'css'].flatMap((d) => O.offlineFiles().filter((x) => x.startsWith(`${d}/`))).filter((x) => /(^|[^.\w])import\(['"]https?:|<script[^>]+src=["']https?:|@import url\(["']?https?:/.test(readFileSync(x, 'utf8')));
+  eq('no app file pulls code straight from the internet', nonLocal, []);
+  const st = O.offlineStatus();
+  t('the offline file list and service worker version are up to date', st.ok, 'run: node tools/offline-list.mjs');
+  t('the offline list covers the app, styles, libraries and icon', ['index.html', 'css/app.css', 'js/app.js', 'js/backup.js', 'vendor/sql.js/sql-wasm.wasm', 'icon.svg', 'manifest.webmanifest'].every((x) => st.files.includes(x)) && !st.files.some((x) => x.startsWith('tests/') || x.endsWith('.map')));
+  eq('no .mjs files (simple servers send them as plain text, which browsers refuse)', st.files.filter((x) => x.endsWith('.mjs')), []);
+  t('the web app manifest is valid', (() => { const m = JSON.parse(readFileSync('manifest.webmanifest', 'utf8')); return m.name && m.start_url && m.display === 'standalone' && m.icons.length; })());
+  // backup files
+  const s1 = M.normalize(sampleProject());
+  const s2 = { ...M.blankProject('Second'), updatedAt: '2027-01-01T00:00:00.000Z' };
+  const file = B.backupFile([s1, s2], { org: 'X', templates: [{ name: 'T1' }], lastBackup: 'a', backupSnooze: 'b' }, new Date('2027-01-02T10:00:00Z'));
+  t('a backup holds every project and the templates, not the reminder state', file.kind === B.BACKUP_KIND && file.projects.length === 2 && file.settings.templates.length === 1 && !('lastBackup' in file.settings) && !('backupSnooze' in file.settings));
+  const back = B.parseBackup(JSON.stringify(file));
+  eq('a backup reads back', [back.projects.length, back.createdAt, back.projects[0].meta.name], [2, '2027-01-02T10:00:00.000Z', s1.meta.name]);
+  eq('a single project file is accepted too', B.parseBackup(JSON.stringify(s1)).projects.length, 1);
+  const errs = ['nope', '{"a":1}', JSON.stringify({ kind: B.BACKUP_KIND, projects: [{ x: 1 }] })].map((x) => { try { B.parseBackup(x); return ''; } catch (e) { return e.message; } });
+  t('bad files are refused with a clear reason', /not valid JSON/.test(errs[0]) && /not a BA Builder/.test(errs[1]) && /damaged/.test(errs[2]), errs.join(' | '));
+  const plan = B.restorePlan([{ ...s1, updatedAt: '2030-01-01' }, M.blankProject('Mine')], [s1, s2]);
+  t('restore plan: replace, add, keep, and warn about newer work', plan.replace.length === 1 && plan.add.join() === 'Second' && plan.keep.join() === 'Mine' && plan.newer.length === 1, JSON.stringify(plan));
+  const merged = B.mergeSettings({ templates: [{ name: 'A', v: 1 }, { name: 'B' }], org: 'Mine' }, { templates: [{ name: 'A', v: 2 }, { name: 'C' }], org: 'Theirs' });
+  t('restoring merges templates and keeps my preferences', merged.templates.map((x) => x.name).sort().join() === 'A,B,C' && merged.templates.find((x) => x.name === 'A').v === 2 && merged.org === 'Mine');
+  // reminders
+  const now = Date.parse('2027-03-10T12:00:00Z');
+  const proj = (iso) => ({ updatedAt: iso });
+  eq('no reminder without changes', B.backupDue([proj('2027-03-01T00:00:00Z')], { lastBackup: '2027-03-02T00:00:00Z' }, now).due, false);
+  eq('weekly reminder after 7 days with changes', B.backupDue([proj('2027-03-05T00:00:00Z')], { lastBackup: '2027-03-02T00:00:00Z' }, now).due, true);
+  eq('not before the interval', B.backupDue([proj('2027-03-09T00:00:00Z')], { lastBackup: '2027-03-08T00:00:00Z' }, now).due, false);
+  eq('daily reminder', B.backupDue([proj('2027-03-09T13:00:00Z')], { lastBackup: '2027-03-09T12:00:00Z', backupEvery: 'daily' }, now).due, true);
+  eq('switched off', B.backupDue([proj('2027-03-09T13:00:00Z')], { lastBackup: '2027-01-01T00:00:00Z', backupEvery: 'off' }, now).due, false);
+  eq('snoozed until tomorrow', B.backupDue([proj('2027-03-09T13:00:00Z')], { lastBackup: '2027-01-01T00:00:00Z', backupSnooze: '2027-03-11T00:00:00Z' }, now).due, false);
+  const never = B.backupDue([proj('2027-03-09T13:00:00Z')], { backupBase: '2027-03-01T00:00:00Z' }, now);
+  t('never backed up: counted from first use', never.due && never.never && never.days === 9 && never.changed === 1, JSON.stringify(never));
+  eq('a brand-new user is not nagged on day one', B.backupDue([proj('2027-03-10T11:00:00Z')], {}, now).due, false);
+  eq('backup file name has the date', B.backupName(new Date('2027-03-10T12:00:00Z')), 'BA_Builder_backup_2027-03-10.json');
+}
+
 function parseCsvLocal(text) {
   const rows = []; let row = [], cell = '', q = false;
   for (let i = 0; i < text.length; i++) {

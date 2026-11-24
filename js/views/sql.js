@@ -8,21 +8,28 @@ import { csv } from '../gen/exports.js';
 import { parseCsv } from './settings.js';
 import { renderCollection, openItem } from './collection.js';
 
-const BASE = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/';
+// SQLite (sql.js, MIT) from the bundled copy in /vendor, so it works offline; the CDN is a fallback.
+const BASES = [new URL('../../vendor/sql.js/', import.meta.url).href, 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/'];
 let SQL = null; // the sql.js module
 let db = null;
 let dbFor = ''; // project id + model fingerprint the database was built for
 let lastSql = '';
 
-function loadEngine() {
-  if (SQL) return Promise.resolve(SQL);
+function loadFrom(base) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
-    s.src = `${BASE}sql-wasm.js`;
-    s.onload = () => window.initSqlJs({ locateFile: (f) => `${BASE}${f}` }).then((m) => resolve((SQL = m))).catch(reject);
-    s.onerror = () => reject(new Error('Could not load the SQL engine — check your internet connection.'));
+    s.src = `${base}sql-wasm.js`;
+    s.onload = () => window.initSqlJs({ locateFile: (f) => `${base}${f}` }).then(resolve).catch(reject);
+    s.onerror = () => (s.remove(), reject(new Error('not found')));
     document.head.appendChild(s);
   });
+}
+async function loadEngine() {
+  if (SQL) return SQL;
+  for (const base of BASES) {
+    try { return (SQL = await loadFrom(base)); } catch { /* try the next copy */ }
+  }
+  throw new Error('Could not load the SQL engine — the bundled copy is missing and the internet is not available.');
 }
 
 const fingerprint = (p) => `${p.id}:${JSON.stringify(p.entities.map((e) => [e.name, (e.fields || []).map((f) => [f.name, f.type, f.pk, f.fk])]))}`;

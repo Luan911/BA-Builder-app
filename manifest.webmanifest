@@ -1,0 +1,13 @@
+{
+  "name": "BA Builder",
+  "short_name": "BA Builder",
+  "description": "A complete workspace for Technical Business Analysts: requirements, modelling, diagrams and documents. Works offline.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

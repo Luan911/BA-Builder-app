@@ -1,5 +1,6 @@
 // Projects, import / export, technical exports and preferences.
-import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings, templates, saveTemplate, deleteTemplate } from '../store.js';
+import { project, projects, switchProject, newProject, loadSample, deleteProject, addProject, update, getSettings, saveSettings, templates, saveTemplate, deleteTemplate, workspace, restoreProjects, replaceWorkspace } from '../store.js';
+import { backupFile, backupName, parseBackup, restorePlan, mergeSettings, savePoint, listPoints, readPoint, INTERVALS } from '../backup.js';
 import { templateFrom } from '../gen/capture.js';
 import { jiraExportModal, jiraImport } from './capture.js';
 import { esc, $, $$, toast, download, pickFile, fileSafe, confirmBox } from '../ui.js';
@@ -10,6 +11,78 @@ import { allDiagrams } from '../gen/diagrams.js';
 import { exportSvg } from './canvas.js';
 import { zipFiles } from '../gen/zip.js';
 import { DEFAULT_BRAND } from '../gen/docx.js';
+
+/** Download a backup of every project and remember when. */
+export function backupNow() {
+  const now = new Date();
+  download(JSON.stringify(backupFile(projects(), getSettings(), now), null, 1), backupName(now), 'application/json');
+  saveSettings({ lastBackup: now.toISOString(), backupSnooze: '' }, { quiet: true });
+  // ask the browser not to clear this site's data when space runs low (no prompt in most browsers)
+  navigator.storage?.persist?.().catch(() => {});
+  toast(`Backup downloaded — ${projects().length} project${projects().length === 1 ? '' : 's'}. Keep the file somewhere safe (e.g. OneDrive or Google Drive).`);
+}
+
+const fmtSize = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const fmtWhen = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '—' : `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`; };
+
+/** Restore from a backup file (or a single project file) after showing what will happen. */
+async function restoreFromFile() {
+  const f = await pickFile('.json,application/json');
+  if (!f) return;
+  try {
+    const b = parseBackup(f.text);
+    const plan = restorePlan(projects(), b.projects);
+    const lines = [
+      plan.replace.length ? `Replace ${plan.replace.length}: ${plan.replace.join(', ')}` : '',
+      plan.newer.length ? `(${plan.newer.join(', ')} ${plan.newer.length === 1 ? 'has' : 'have'} newer changes here than in the backup)` : '',
+      plan.add.length ? `Add ${plan.add.length}: ${plan.add.join(', ')}` : '',
+      plan.keep.length ? `Keep ${plan.keep.length} other project${plan.keep.length === 1 ? '' : 's'} as they are` : '',
+    ].filter(Boolean).join('. ');
+    if (!(await confirmBox(`Restore from ${f.name}${b.createdAt ? ` (${fmtWhen(b.createdAt)})` : ''}? ${lines}. A restore point of your current work is saved first.`, 'Restore'))) return;
+    await savePoint(workspace(), 'Before restoring a backup', 'before').catch(() => {});
+    restoreProjects(b.projects, b.settings ? mergeSettings(getSettings(), b.settings) : null);
+    toast(`Restored ${b.projects.length} project${b.projects.length === 1 ? '' : 's'}`);
+  } catch (e) { toast(`Could not restore: ${e.message}`, 'err'); }
+}
+
+/** Fill in the offline status, storage use and restore points (all asynchronous). */
+async function fillSafety(root) {
+  const off = $('[data-offline]', root);
+  if (off) {
+    const sw = navigator.serviceWorker;
+    if (!sw || !/^https?:$/.test(location.protocol)) off.textContent = 'Not available in this browser.';
+    else if (location.hostname === 'localhost') off.textContent = 'Running from this computer (localhost): every file, including the diagram and SQL libraries, is already local, so no internet is needed. When the app is opened from a web address it also saves itself on the device for offline use.';
+    else if (!sw.controller) off.textContent = 'Saving BA Builder on this device… (reload once it is done to be sure).';
+    else {
+      off.textContent = 'Ready — BA Builder is saved on this device and opens without internet.';
+      sw.addEventListener('message', (e) => { if (e.data?.type === 'status') off.textContent = `Ready — BA Builder is saved on this device (${e.data.files} files, version ${e.data.version}) and opens without internet.`; }, { once: true });
+      sw.controller.postMessage('status');
+    }
+  }
+  const st = $('[data-storage]', root);
+  if (st && navigator.storage?.estimate) {
+    try {
+      const [{ usage, quota }, kept] = await Promise.all([navigator.storage.estimate(), navigator.storage.persisted?.() ?? false]);
+      st.textContent = `This browser holds ${fmtSize(usage || 0)} for BA Builder${quota ? ` (of about ${fmtSize(quota)} available)` : ''}. ${kept ? 'Protected: the browser will not clear it to free space.' : 'Not yet protected from automatic clean-up — backing up asks the browser to keep it.'}`;
+    } catch { st.textContent = ''; }
+  }
+  const box = $('[data-points]', root);
+  if (!box) return;
+  try {
+    const pts = await listPoints();
+    box.innerHTML = pts.length ? `<div class="tbl-wrap"><table class="tbl points"><thead><tr><th>Restore point</th><th>Saved</th><th>Projects</th><th>Size</th><th></th></tr></thead><tbody>${pts.map((x) => `<tr><td>${esc(x.label)}</td><td>${esc(fmtWhen(x.at))}</td><td>${x.projects}</td><td>${fmtSize(x.size)}</td><td><button class="btn sm" data-rp="${esc(x.id)}">Restore</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted small" style="padding:0 16px 12px">No restore points yet — the first is saved a few seconds after you start working.</p>';
+    $$('[data-rp]', box).forEach((b) => (b.onclick = async () => {
+      const pt = pts.find((x) => x.id === b.dataset.rp);
+      if (!(await confirmBox(`Go back to the restore point "${pt.label}" from ${fmtWhen(pt.at)}? Every project in this browser is replaced by that copy (${pt.projects} project${pt.projects === 1 ? '' : 's'}). Your current work is saved as a restore point first, so you can come back.`, 'Restore'))) return;
+      try {
+        const data = await readPoint(pt.id);
+        await savePoint(workspace(), 'Before going back to a restore point', 'before');
+        replaceWorkspace(data);
+        toast('Restored');
+      } catch (e) { toast(e.message, 'err'); }
+    }));
+  } catch (e) { box.innerHTML = `<p class="muted small" style="padding:0 16px 12px">${esc(e.message)}</p>`; }
+}
 
 /** Shrink a logo to at most 600 × 240 px and keep it as a PNG data URL (transparency kept). */
 function logoFrom(url) {
@@ -94,6 +167,18 @@ export function renderSettings(root) {
         <td style="white-space:nowrap">${x.id !== p.id ? `<button class="btn sm" data-open="${x.id}">Open</button>` : ''}<button class="btn sm" data-dupp="${x.id}">Duplicate</button><button class="btn sm danger" data-delp="${x.id}">Delete</button></td></tr>`).join('')}
       </tbody></table></div></section>
 
+    <section class="card flush" data-safety><div class="card-head"><h2>Backups & offline</h2><span class="grow"></span><button class="btn sm primary" data-backup>Back up everything (.json)</button><button class="btn sm" data-restore>Restore from a backup…</button></div>
+      <div style="padding:0 16px 4px">
+        <p class="small" style="margin:0 0 6px"><b>Last backup:</b> ${s.lastBackup ? esc(fmtWhen(s.lastBackup)) : 'never'} · one file with all ${projects().length} project${projects().length === 1 ? '' : 's'}, your templates and branding.</p>
+        <label class="small">Remind me to back up <select data-bevery style="width:auto;display:inline-block;margin-left:6px">${Object.keys(INTERVALS).map((k) => `<option value="${k}" ${(s.backupEvery || 'weekly') === k ? 'selected' : ''}>${{ daily: 'every day', weekly: 'every week', monthly: 'every month', off: 'never' }[k]}</option>`).join('')}</select> when something has changed.</label>
+        <p class="small muted" style="margin:8px 0 4px"><b>Offline:</b> <span data-offline>Checking…</span></p>
+        <p class="small muted" style="margin:0 0 8px"><b>Storage:</b> <span data-storage></span></p>
+        <h3 style="margin:12px 0 4px;font-size:14px">Restore points in this browser</h3>
+        <p class="small muted" style="margin:0 0 8px">Saved automatically once a day while you work, and before you delete a project or restore a backup. They live in this browser only — a backup file is still the safe copy.</p>
+      </div>
+      <div data-points></div>
+    </section>
+
     <section class="card"><h2>Export "${esc(p.meta.name || 'this project')}"</h2>
       <div class="grid g3" style="margin-top:12px">
         <button class="btn primary" data-zip>Complete pack (.zip)</button>
@@ -147,6 +232,7 @@ export function renderSettings(root) {
     if (!f) return;
     try {
       const data = JSON.parse(f.text);
+      if (data.kind === 'ba-builder-backup') throw new Error('this is a full backup — use "Restore from a backup" under Backups & offline');
       if (!data.meta) throw new Error('not a BA Builder project');
       const x = normalize(data);
       if (projects().some((y) => y.id === x.id)) x.id = uid('prj');
@@ -165,7 +251,9 @@ export function renderSettings(root) {
   }));
   $$('[data-delp]', root).forEach((b) => (b.onclick = async () => {
     const x = projects().find((y) => y.id === b.dataset.delp);
-    if (await confirmBox(`Permanently delete "${x.meta.name}"? Export it first if you may need it again. This cannot be undone.`)) deleteProject(x.id);
+    if (!(await confirmBox(`Delete "${x.meta.name}"? A restore point is saved first, so you can still get it back from "Backups & offline" in this browser.`))) return;
+    await savePoint(workspace(), `Before deleting "${x.meta.name}"`, 'before').catch(() => {});
+    deleteProject(x.id);
   }));
   $('[data-json]', root).onclick = () => download(JSON.stringify(p, null, 2), `${code}.babuilder.json`, 'application/json');
   $('[data-oas]', root).onclick = () => download(openApi(p), `${code}_openapi.yaml`, 'application/yaml');
@@ -190,6 +278,10 @@ export function renderSettings(root) {
     const key = $('[data-ckey]', root).value;
     download(`${COLLECTIONS[key].fields.filter((f) => !['multi', 'rows'].includes(f.type) && !(f.type === 'select' && typeof f.options === 'function')).map((f) => f.label).join(',')}\r\n`, `${fileSafe(COLLECTIONS[key].title)}_template.csv`, 'text/csv');
   };
+  $('[data-backup]', root).onclick = () => { backupNow(); setTimeout(() => renderSettings(root), 50); };
+  $('[data-restore]', root).onclick = () => restoreFromFile();
+  $('[data-bevery]', root).onchange = (e) => saveSettings({ backupEvery: e.target.value });
+  fillSafety(root);
   $('[data-org]', root).onchange = (e) => saveSettings({ org: e.target.value.trim() }, { quiet: true });
   const setBrand = (patch, quiet = true) => saveSettings({ brand: { ...DEFAULT_BRAND, ...(getSettings().brand || {}), ...patch } }, { quiet });
   $('[data-bfoot]', root).onchange = (e) => setBrand({ footer: e.target.value.trim() });

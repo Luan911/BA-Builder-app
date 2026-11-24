@@ -65,6 +65,7 @@
       nextFile = null;
       this.onchange?.();
     };
+    const update7 = () => { const ws = JSON.parse(w.localStorage.getItem('bab.workspace')); ws.projects[ws.current].updatedAt = new Date().toISOString(); w.localStorage.setItem('bab.workspace', JSON.stringify(ws)); w.dispatchEvent(new w.Event('focus')); };
     const bytesOf = async (href) => new Uint8Array(await (await fetch(href)).arrayBuffer());
     w.print = () => downloads.push({ name: 'print' });
     await until(() => view() && view().innerText.length > 50);
@@ -395,6 +396,71 @@
       check('the pack has a .docx for every document plus specs and the project file', names.filter((x) => /^documents\/.*\.docx$/.test(x)).length === DOC_LIST.length && names.some((x) => x.endsWith('openapi.yaml')) && names.some((x) => x.endsWith('.babuilder.json')), names.length + ' files');
     }
     check('Word, branding and Jira raise no errors', !errorsSince(n6).length, errorsSince(n6).join(' | ').slice(0, 300));
+
+    // ---- 7. Backups, restore points and offline ----
+    log('7. Backups, restore points and offline…');
+    // (the app inside the test frame stores restore points in its own test database)
+    await go('#/settings', 300);
+    check('backups section is shown', /Backups & offline/.test(view().innerText) && /Last backup:/.test(view().innerText));
+    // no CDN: the diagram library came from /vendor
+    const libs = w.performance.getEntriesByType('resource').map((e) => e.name);
+    check('diagram library loaded from the bundled copy, not a CDN', libs.some((x) => x.includes('/vendor/mermaid/')) && !libs.some((x) => /cdn\.jsdelivr|cdnjs/.test(x)), libs.filter((x) => /mermaid|sql|cdn/.test(x)).slice(0, 5).join(' '));
+    const sqlLoaded = libs.some((x) => x.includes('/vendor/sql.js/sql-wasm'));
+    check('SQL engine loaded from the bundled copy', sqlLoaded, libs.filter((x) => /sql/.test(x)).join(' '));
+    // back up everything
+    downloads.length = 0; $('[data-backup]', view()).click(); await sleep(300);
+    const bk = downloads.find((x) => /^BA_Builder_backup_\d{4}-\d{2}-\d{2}\.json$/.test(x.name));
+    check('backup file downloaded', !!bk, downloads.map((x) => x.name).join(', '));
+    const st7 = JSON.parse(w.localStorage.getItem('bab.settings'));
+    check('last backup time remembered', !!st7.lastBackup && Date.now() - Date.parse(st7.lastBackup) < 60000);
+    let backupText = '';
+    if (bk) {
+      backupText = new TextDecoder().decode(await bytesOf(bk.href));
+      const data = JSON.parse(backupText);
+      check('the backup holds every project and the templates', data.kind === 'ba-builder-backup' && data.projects.length === Object.keys(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).length && (data.settings.templates || []).length > 0);
+    }
+    // the reminder appears when a backup is due
+    const st10 = JSON.parse(w.localStorage.getItem('bab.settings'));
+    st10.lastBackup = new Date(Date.now() - 10 * 86400000).toISOString(); st10.backupSnooze = '';
+    w.localStorage.setItem('bab.settings', JSON.stringify(st10));
+    update7();
+    await loadApp(); w = frame.contentWindow; d = w.document;
+    w.HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push({ name: this.download, href: this.href }); };
+    w.HTMLInputElement.prototype.click = function () { if (this.type !== 'file') return; const dt = new w.DataTransfer(); if (nextFile) dt.items.add(nextFile); this.files = dt.files; nextFile = null; this.onchange?.(); };
+    await until(() => view() && view().innerText.length > 50);
+    const n7r = 0;
+    check('backup reminder shows when a week has passed with changes', await until(() => /Last backup 10 days ago/.test($('[data-banner="backup"]')?.innerText || ''), 3000), $('[data-banners]')?.innerText);
+    $('[data-banner="backup"] [data-b="1"]').click(); await sleep(200);
+    check('"Remind me tomorrow" hides it', !$('[data-banner="backup"]') && Date.parse(JSON.parse(w.localStorage.getItem('bab.settings')).backupSnooze) > Date.now());
+    // delete a project → restore point → bring it back
+    await go('#/settings', 300);
+    const before = Object.keys(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).length;
+    const victim = [...view().querySelectorAll('[data-delp]')].pop();
+    const victimName = victim.closest('tr').querySelector('b').textContent;
+    victim.click(); await until(() => $('.backdrop [data-yes]'), 2000);
+    check('deleting says a restore point is kept', /restore point is saved first/.test($('.backdrop').innerText));
+    $('.backdrop [data-yes]').click(); await sleep(600);
+    check('project deleted', Object.keys(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).length === before - 1);
+    await go('#/settings', 300);
+    check('restore point listed', await until(() => view().innerText.includes(`Before deleting "${victimName}"`), 4000), $('[data-points]', view())?.innerText.slice(0, 200));
+    const rp = [...view().querySelectorAll('[data-rp]')].find((b) => /Before deleting/.test(b.closest('tr').innerText));
+    rp?.click(); await until(() => $('.backdrop [data-yes]'), 2000); $('.backdrop [data-yes]')?.click(); await sleep(800);
+    check('going back to the restore point brings the project back', Object.keys(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).length === before && Object.values(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).some((x) => x.meta.name === victimName));
+    // restore from the backup file: same projects are replaced, nothing duplicated
+    if (backupText) {
+      await go('#/settings', 300);
+      nextFile = new w.File([backupText], 'backup.json', { type: 'application/json' });
+      $('[data-restore]', view()).click();
+      await until(() => $('.backdrop [data-yes]'), 3000);
+      check('restore explains what will happen', /Replace \d+/.test($('.backdrop')?.innerText || ''), $('.backdrop')?.innerText.slice(0, 200));
+      $('.backdrop [data-yes]')?.click(); await sleep(800);
+      check('restore from a backup file keeps every project once', Object.keys(JSON.parse(w.localStorage.getItem('bab.workspace')).projects).length === before);
+    }
+    nextFile = new w.File([backupText || '{}'], 'backup.json', { type: 'application/json' });
+    await go('#/settings', 300); $('[data-import]', view()).click(); await sleep(400);
+    check('a full backup in "Import project file" points to Restore', /use "Restore from a backup"/.test(d.body.innerText));
+    check('backups and restore points raise no errors', !errorsSince(n7r).length, errorsSince(n7r).join(' | ').slice(0, 300));
+    indexedDB.deleteDatabase('bab-restore-points-test');
     check('no errors in the whole run (including daily-use features)', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
     check('no errors in the whole run', !(w.__babErrors || []).length, (w.__babErrors || []).slice(0, 5).join(' | ').slice(0, 500));
   } catch (e) {

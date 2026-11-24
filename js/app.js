@@ -1,5 +1,6 @@
 // App shell: navigation, routing, project switcher, undo.
-import { load, project, projects, subscribe, switchProject, undo, saved, getSettings, saveSettings } from './store.js';
+import { load, project, projects, subscribe, switchProject, undo, saved, getSettings, saveSettings, workspace } from './store.js';
+import { backupDue, savePoint } from './backup.js';
 import { esc, $, $$, toast } from './ui.js';
 import { renderCollection } from './views/collection.js';
 import { renderDashboard } from './views/dashboard.js';
@@ -20,7 +21,7 @@ import { renderDiagrams } from './views/diagrams.js';
 import { renderStudio } from './views/studio.js';
 import { renderCanvas } from './views/canvas.js';
 import { renderDocuments } from './views/documents.js';
-import { renderSettings } from './views/settings.js';
+import { renderSettings, backupNow } from './views/settings.js';
 import { renderDecisionTables } from './views/decisiontables.js';
 import { renderWizard, startNewSrs } from './views/wizard.js';
 import { openJump } from './views/jump.js';
@@ -71,6 +72,7 @@ function shell() {
           <span class="grow"></span>
           <button class="btn sm" data-undo title="Undo (Ctrl+Z)">↶ Undo</button>
         </header>
+        <div data-banners></div>
         <main id="view" tabindex="-1"></main>
       </div>
     </div>`;
@@ -151,6 +153,59 @@ function renderDataModel(v) {
   renderCollection($('[data-b]', v), 'relationships', { heading: false });
 }
 
+/** A slim notice under the top bar (one per id) with action buttons. */
+export function banner(id, text, actions = []) {
+  const box = $('[data-banners]');
+  if (!box) return;
+  box.querySelector(`[data-banner="${id}"]`)?.remove();
+  const el = document.createElement('div');
+  el.className = 'banner no-print';
+  el.dataset.banner = id;
+  el.setAttribute('role', 'status');
+  el.innerHTML = `<span>${esc(text)}</span><span class="grow"></span>${actions.map(([label], i) => `<button class="btn sm${i ? ' ghost' : ' primary'}" data-b="${i}">${esc(label)}</button>`).join('')}`;
+  actions.forEach(([, fn], i) => (el.querySelector(`[data-b="${i}"]`).onclick = () => { el.remove(); fn(); }));
+  box.appendChild(el);
+}
+
+/** Remind the user to back up when there are changes and the chosen interval has passed. */
+function checkBackup() {
+  const s = getSettings();
+  if (!s.backupBase) saveSettings({ backupBase: new Date().toISOString() }, { quiet: true });
+  const d = backupDue(projects(), getSettings());
+  if (!d.due) return $('[data-banner="backup"]')?.remove();
+  const when = d.never ? 'You have not backed up yet' : `Last backup ${d.days} day${d.days === 1 ? '' : 's'} ago`;
+  banner('backup', `${when} — ${d.changed} project${d.changed === 1 ? '' : 's'} changed since. Your work is only stored in this browser.`, [
+    ['Back up now', () => backupNow()],
+    ['Remind me tomorrow', () => saveSettings({ backupSnooze: new Date(Date.now() + 86400000).toISOString() }, { quiet: true })],
+  ]);
+}
+
+/** A restore point in this browser: one per day, refreshed a little after each change. */
+let pointTimer = 0;
+function dailyPoint(delay = 15000) {
+  clearTimeout(pointTimer);
+  pointTimer = setTimeout(() => savePoint(workspace(), 'Daily').catch(() => { /* restore points are a bonus */ }), delay);
+}
+
+/** Offline support (not on localhost, where the files are already on this computer, or in tests). */
+function offline() {
+  if (!('serviceWorker' in navigator) || !/^https?:$/.test(location.protocol)) return;
+  if (location.hostname === 'localhost' || /[?&]e2e=/.test(location.search)) return;
+  let wanted = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (wanted) location.reload(); });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    const ready = () => banner('update', 'A new version of BA Builder is ready. Your work is saved.', [['Reload now', () => { wanted = true; reg.waiting?.postMessage('update'); }], ['Later', () => {}]]);
+    if (reg.waiting && navigator.serviceWorker.controller) ready();
+    reg.addEventListener('updatefound', () => {
+      const n = reg.installing;
+      n?.addEventListener('statechange', () => {
+        if (n.state === 'installed' && navigator.serviceWorker.controller) ready();
+        if (n.state === 'activated' && !wanted) toast('BA Builder is saved on this device — it now works offline');
+      });
+    });
+  }).catch(() => { /* offline mode is optional */ });
+}
+
 /** Tell the user, calmly, if something unexpected fails — their work is already saved. */
 function watchErrors() {
   let last = 0;
@@ -176,8 +231,14 @@ function start() {
     route();
     window.scrollTo(0, 0);
   });
+  offline();
+  checkBackup();
+  dailyPoint(3000);
+  setInterval(checkBackup, 3600000);
   subscribe((info) => {
     chrome();
+    dailyPoint();
+    if (info.settings || info.rerender) checkBackup();
     if (info.rerender && !document.querySelector('.backdrop')) {
       const y = window.scrollY;
       route();

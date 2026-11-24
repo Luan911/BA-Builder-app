@@ -92,6 +92,34 @@ export const loadSample = () => {
   return addProject(s);
 };
 
+/** The whole workspace (all projects), for backups and restore points. */
+export const workspace = () => ws;
+
+/** Put projects from a backup into this browser: same ID = replaced, new ID = added. */
+export function restoreProjects(list, settingsAfter = null) {
+  for (const raw of list) {
+    const p = normalize(JSON.parse(JSON.stringify(raw)));
+    ws.projects[p.id] = p;
+  }
+  if (list.length) ws.current = list[0].id;
+  if (settingsAfter) settings = settingsAfter, safe.set(SKEY, JSON.stringify(settings));
+  undoStack.length = 0;
+  persist();
+  emit({ rerender: true, settings: !!settingsAfter });
+}
+
+/** Replace every project with a restore point. */
+export function replaceWorkspace(data) {
+  if (!data || !data.projects || !Object.keys(data.projects).length) throw new Error('This restore point is empty');
+  const next = { current: data.current, projects: {} };
+  for (const [id, p] of Object.entries(data.projects)) next.projects[id] = normalize(p);
+  if (!next.projects[next.current]) next.current = Object.keys(next.projects)[0];
+  ws = next;
+  undoStack.length = 0;
+  persist();
+  emit({ rerender: true });
+}
+
 export function deleteProject(id) {
   delete ws.projects[id];
   if (!Object.keys(ws.projects).length) {

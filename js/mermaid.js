@@ -1,7 +1,11 @@
-// Mermaid loader + SVG/PNG export helpers. The library loads on first use.
-const URL_MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+// Mermaid loader + SVG/PNG export helpers. The library loads on first use, from the bundled copy in
+// /vendor (works offline); the CDN is only a fallback if that copy is missing.
+const LOCAL_MERMAID = new URL('../vendor/mermaid/mermaid.esm.min.js', import.meta.url).href;
+const CDN_MERMAID = 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
 // Optional "tidy" layout engine (ELK, MIT licence): square-cornered lines and fewer crossings on big flowcharts.
-const URL_ELK = 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+const LOCAL_ELK = new URL('../vendor/layout-elk/mermaid-layout-elk.esm.min.js', import.meta.url).href;
+const CDN_ELK = 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.1.7/dist/mermaid-layout-elk.esm.min.mjs';
+const importEither = (local, cdn) => import(local).catch(() => import(cdn));
 let elkReady = null;
 // Diagrams this big are always drawn with the standard engine: ELK can freeze the page on huge graphs.
 const ELK_MAX_LINES = 600;
@@ -16,7 +20,7 @@ const THEMES = {
 };
 
 function lib(mode) {
-  ready ||= import(URL_MERMAID).catch((e) => {
+  ready ||= importEither(LOCAL_MERMAID, CDN_MERMAID).catch((e) => {
     ready = null;
     throw new Error(`Could not load the diagram library — check your internet connection. (${e.message})`);
   });
@@ -48,7 +52,7 @@ export async function render(code, { light = false, tidy = false } = {}) {
   const mm = await lib(light ? 'light' : 'dark');
   if (tidy && canTidy(code)) {
     try {
-      elkReady ||= import(URL_ELK).then((m) => mm.registerLayoutLoaders(m.default));
+      elkReady ||= importEither(LOCAL_ELK, CDN_ELK).then((m) => mm.registerLayoutLoaders(m.default));
       await elkReady;
       code = `%%{init: {"layout": "elk"}}%%\n${code}`;
     } catch { elkReady = null; } // offline or blocked: fall back to the standard layout

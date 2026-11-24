@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 
 const files = [];
 const walk = (dir) => { for (const f of readdirSync(dir)) { const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (/\.(m?js)$/.test(f)) files.push(p); } };
-walk('js'); walk('tests');
+walk('js'); walk('tests'); walk('tools'); files.push('sw.js');
 let bad = 0;
 // inline module scripts in the test pages too
 const pages = readdirSync('tests').filter((f) => f.endsWith('.html')).map((f) => join('tests', f));
